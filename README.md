@@ -13,24 +13,14 @@ Open `http://localhost:5000`.
 ## Dokploy deployment
 
 1. Create or reuse a Docker Compose application in Dokploy.
-2. Connect the GitHub repository `akcrnd/echotune`.
-3. Select branch `main`.
-4. Enable Auto Deploy.
-5. Deploy using the repository `docker-compose.yml`.
+2. In the Dokploy service, use the `Git` provider instead of the GitHub App provider.
+3. Set repository URL to `git@github.com:akcrnd/echotune.git`.
+4. Select branch `main`.
+5. Set compose path to `./docker-compose.yml`.
+6. Select the Dokploy SSH key that has GitHub access.
+7. Enable Auto Deploy.
 
 The service stores runtime data at `/data/data.json` inside the container. The named Docker volume `echotune_data` keeps that file across redeployments, so pushes to `main` can trigger automatic deployment without wiping live data.
-
-## Internal network auto deploy
-
-GitHub cannot call a private Dokploy URL on `192.168.x.x` directly. For internal-only deployments, this repository uses a GitHub Actions workflow that runs on a self-hosted Linux runner inside the same network and posts to the Dokploy webhook URL.
-
-Required setup:
-
-1. Register a self-hosted GitHub Actions runner for `akcrnd/echotune` on a Linux machine that can reach `http://192.168.3.17:3000`.
-2. Add the repository secret `DOKPLOY_WEBHOOK_URL` with the Dokploy deployment webhook URL.
-3. Leave the workflow in `.github/workflows/deploy.yml` on branch `main`.
-
-After that, every push to `main` triggers the runner, and the runner calls Dokploy from inside the private network.
 
 ## Environment
 
@@ -41,3 +31,4 @@ After that, every push to `main` triggers the runner, and the runner calls Dokpl
 
 - On first container start, if `DATA_FILE_PATH` does not exist yet, the image seeds it from the repository `data.json`.
 - After that, the mounted volume becomes the source of truth for production data.
+- This project uses Dokploy `Git(SSH)` access for private repository deployment inside the local network.

@@ -4,3 +4,7 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Legacy nested-project placeholders removed from the repo root
+/EchoTune/
+/EchoTune_Backup_20250921_065831/

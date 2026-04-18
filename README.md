@@ -48,6 +48,7 @@ Runtime services:
 - Readiness endpoint: `/api/health`
 - The app boot fails fast if Postgres is unavailable or schema bootstrap cannot complete.
 - Postgres data persists in the Docker volume `echotune_postgres`.
+- GitHub App based Dokploy auto deploy is configured for the `main` branch.
 
 ## Backup and recovery
 

@@ -1,6 +1,6 @@
 # EchoTune
 
-EchoTune is deployed as a single Docker service. Runtime data is stored in `data.json`, and production containers should mount that file path from a persistent volume.
+EchoTune now runs against Postgres for operational data. The legacy `data.json` file remains in the repo as a migration source and emergency snapshot reference, but the running app should use `DATABASE_URL` and Postgres-backed storage only.
 
 ## Local run
 
@@ -8,7 +8,20 @@ EchoTune is deployed as a single Docker service. Runtime data is stored in `data
 docker compose up -d --build
 ```
 
-Open `http://localhost:5000`.
+Open `http://localhost:22023`.
+
+## Data cutover
+
+1. Create a snapshot backup from the current `data.json`.
+2. Provision Postgres and set `DATABASE_URL`.
+3. Run a dry run to confirm source counts.
+4. Run the data migration once during a short maintenance window.
+
+```bash
+npm run data:backup
+npm run db:migrate-data:dry-run
+npm run db:migrate-data
+```
 
 ## Dokploy deployment
 
@@ -20,15 +33,24 @@ Open `http://localhost:5000`.
 6. Select the Dokploy SSH key that has GitHub access.
 7. Enable Auto Deploy.
 
-The service stores runtime data at `/data/data.json` inside the container. The named Docker volume `echotune_data` keeps that file across redeployments, so pushes to `main` can trigger automatic deployment without wiping live data.
+Runtime services:
+
+- `postgres`: internal Postgres for application data
+- `echotune`: app service exposed on `22023`
 
 ## Environment
 
-- `PORT`: app port, defaults to `5000`
-- `DATA_FILE_PATH`: runtime JSON storage path, defaults to `/data/data.json` in containers
+- `PORT`: app port inside the container, defaults to `5000`
+- `DATABASE_URL`: required runtime Postgres connection string
 
-## Notes
+## Health and operations
 
-- On first container start, if `DATA_FILE_PATH` does not exist yet, the image seeds it from the repository `data.json`.
-- After that, the mounted volume becomes the source of truth for production data.
-- This project uses Dokploy `Git(SSH)` access for private repository deployment inside the local network.
+- Readiness endpoint: `/api/health`
+- The app boot fails fast if Postgres is unavailable or schema bootstrap cannot complete.
+- Postgres data persists in the Docker volume `echotune_postgres`.
+
+## Backup and recovery
+
+- Pre-cutover snapshot: `npm run data:backup`
+- Ongoing backup target: the Postgres volume, not `data.json`
+- Recovery model: restore Postgres volume backup, redeploy app, verify `/api/health`, then smoke-test key APIs

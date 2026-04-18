@@ -1,54 +1,465 @@
 import { randomUUID } from "crypto";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
-import { dirname, join } from "path";
-import type { 
-  Employee, 
-  InsertEmployee, 
-  TrainingHistory, 
-  InsertTrainingHistory,
-  Certification,
-  InsertCertification,
-  Language,
-  InsertLanguage,
-  Skill,
-  InsertSkill,
-  SkillCalculation,
-  InsertSkillCalculation,
-  Patent,
-  InsertPatent,
-  Publication,
-  InsertPublication,
+import type {
   Award,
+  Certification,
+  Employee,
   InsertAward,
-  Project,
+  InsertCertification,
+  InsertEmployee,
+  InsertLanguage,
+  InsertPatent,
   InsertProject,
-  TrainingHours,
+  InsertPublication,
+  InsertSkill,
+  InsertSkillCalculation,
+  InsertTeamEmployees,
+  InsertTrainingHistory,
   InsertTrainingHours,
+  Language,
+  Patent,
+  Project,
+  Publication,
+  Skill,
+  SkillCalculation,
   TeamEmployees,
-  InsertTeamEmployees
+  TrainingHistory,
+  TrainingHours,
 } from "@shared/schema";
+import { ensureDatabaseSchema, pool } from "./db";
+
+type JsonValue = Record<string, any> | any[] | string | number | boolean | null;
+
+type DepartmentRecord = {
+  id?: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  managerId?: string | null;
+  budget?: number | null;
+  location?: string | null;
+  isActive?: boolean;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+};
+
+type TeamRecord = {
+  id?: string;
+  code: string;
+  name: string;
+  departmentCode: string;
+  description?: string | null;
+  teamLeadId?: string | null;
+  budget?: number | null;
+  location?: string | null;
+  isActive?: boolean;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+};
+
+type ProposalFilters = {
+  employeeId?: string;
+  startDate?: string;
+  endDate?: string;
+};
+
+type ProposalRecord = {
+  id: string;
+  employeeId: string;
+  submissionDate?: string | Date | null;
+  createdAt?: string | Date | null;
+  updatedAt?: string | Date | null;
+  [key: string]: any;
+};
+
+const databaseReady = ensureDatabaseSchema();
+
+function uniqueId(prefix?: string): string {
+  return prefix ? `${prefix}_${randomUUID()}` : randomUUID();
+}
+
+function toDate(value: unknown): Date | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function toNumber(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function toInteger(value: unknown): number | null {
+  const parsed = toNumber(value);
+  return parsed === null ? null : Math.trunc(parsed);
+}
+
+function ensureArray(value: unknown): any[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    if (!value.trim()) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [value];
+    } catch {
+      return [value];
+    }
+  }
+  if (value === undefined || value === null) return [];
+  return [value];
+}
+
+function stripUndefined<T extends Record<string, any>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
+}
+
+function serializeJson(value: unknown): JsonValue {
+  if (value === undefined || value === null) return null;
+  if (value instanceof Date) return value.toISOString();
+  return value as JsonValue;
+}
+
+function rowTimestamp(row: Record<string, any>, key: string): Date | undefined {
+  const parsed = toDate(row[key]);
+  return parsed ?? undefined;
+}
+
+async function upsertSetting(key: string, value: JsonValue): Promise<void> {
+  await databaseReady;
+  await pool.query(
+    `
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (key)
+      DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+    `,
+    [key, JSON.stringify(serializeJson(value))],
+  );
+}
+
+async function getSetting<T = any>(key: string): Promise<T | null> {
+  await databaseReady;
+  const result = await pool.query("SELECT value FROM app_settings WHERE key = $1", [key]);
+  if (!result.rows[0]) return null;
+  return result.rows[0].value as T;
+}
+
+function rowEmployee(row: Record<string, any>): Employee {
+  return {
+    id: row.id,
+    employeeNumber: row.employee_number,
+    departmentCode: row.department_code,
+    teamCode: row.team_code,
+    name: row.name,
+    position: row.position,
+    department: row.department,
+    team: row.team,
+    email: row.email,
+    phone: row.phone,
+    hireDate: rowTimestamp(row, "hire_date"),
+    birthDate: rowTimestamp(row, "birth_date"),
+    managerId: row.manager_id,
+    photoUrl: row.photo_url,
+    education: row.education,
+    major: row.major,
+    school: row.school,
+    graduationYear: row.graduation_year,
+    previousExperienceYears: row.previous_experience_years ?? 0,
+    previousExperienceMonths: row.previous_experience_months ?? 0,
+    isDepartmentHead: row.is_department_head ?? false,
+    isActive: row.is_active ?? true,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as Employee;
+}
+
+function rowTraining(row: Record<string, any>): TrainingHistory {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    courseName: row.course_name,
+    provider: row.provider,
+    type: row.type,
+    category: row.category,
+    startDate: rowTimestamp(row, "start_date"),
+    completionDate: rowTimestamp(row, "completion_date"),
+    duration: row.duration,
+    score: row.score,
+    status: row.status,
+    instructorRole: row.instructor_role,
+    certificateUrl: row.certificate_url,
+    notes: row.notes,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as TrainingHistory;
+}
+
+function rowCertification(row: Record<string, any>): Certification {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    name: row.name,
+    issuer: row.issuer,
+    issueDate: rowTimestamp(row, "issue_date"),
+    expiryDate: rowTimestamp(row, "expiry_date"),
+    credentialId: row.credential_id,
+    verificationUrl: row.verification_url,
+    category: row.category,
+    level: row.level,
+    score: row.score,
+    scoreAtAcquisition: row.score_at_acquisition,
+    scoringCriteriaVersion: row.scoring_criteria_version,
+    useFixedScore: row.use_fixed_score ?? true,
+    isActive: row.is_active ?? true,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as Certification;
+}
+
+function rowLanguage(row: Record<string, any>): Language {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    language: row.language,
+    proficiencyLevel: row.proficiency_level,
+    testType: row.test_type,
+    testLevel: row.test_level,
+    score: row.score,
+    maxScore: row.max_score,
+    testDate: rowTimestamp(row, "test_date"),
+    certificateUrl: row.certificate_url,
+    isActive: row.is_active ?? true,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as Language;
+}
+
+function rowSkill(row: Record<string, any>): Skill {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    skillType: row.skill_type,
+    skillName: row.skill_name,
+    proficiencyLevel: row.proficiency_level,
+    yearsOfExperience: row.years_of_experience,
+    lastAssessedDate: rowTimestamp(row, "last_assessed_date"),
+    assessedBy: row.assessed_by,
+    notes: row.notes,
+    isActive: row.is_active ?? true,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as Skill;
+}
+
+function rowSkillCalculation(row: Record<string, any>): SkillCalculation {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    experienceScore: row.experience_score ?? 0,
+    certificationScore: row.certification_score ?? 0,
+    languageScore: row.language_score ?? 0,
+    trainingScore: row.training_score ?? 0,
+    technicalScore: row.technical_score ?? 0,
+    softSkillScore: row.soft_skill_score ?? 0,
+    overallScore: row.overall_score ?? 0,
+    lastCalculatedAt: rowTimestamp(row, "last_calculated_at"),
+    calculatedBy: row.calculated_by,
+  } as SkillCalculation;
+}
+
+function rowPatent(row: Record<string, any>): Patent & Record<string, any> {
+  const registrationDate = rowTimestamp(row, "registration_date");
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    title: row.title,
+    applicationNumber: row.application_number,
+    patentNumber: row.patent_number,
+    status: row.status,
+    applicationDate: rowTimestamp(row, "application_date"),
+    grantDate: registrationDate,
+    registrationDate,
+    inventors: ensureArray(row.inventors),
+    description: row.description,
+    category: row.category,
+    priority: row.priority,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as Patent & Record<string, any>;
+}
+
+function rowPublication(row: Record<string, any>): Publication & Record<string, any> {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    title: row.title,
+    authors: ensureArray(row.authors),
+    journal: row.journal,
+    publicationDate: rowTimestamp(row, "publication_date"),
+    doi: row.doi,
+    impactFactor: row.impact_factor,
+    publicationType: row.category ?? "journal",
+    category: row.category ?? "journal",
+    level: row.level,
+    abstract: row.description,
+    description: row.description,
+    conference: row.conference,
+    url: row.url,
+    status: row.level ?? row.category ?? "journal",
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as Publication & Record<string, any>;
+}
+
+function rowAward(row: Record<string, any>): Award & Record<string, any> {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    awardName: row.title,
+    title: row.title,
+    awardingOrganization: row.awarding_organization,
+    category: row.category,
+    level: row.level,
+    awardDate: rowTimestamp(row, "award_date"),
+    description: row.description,
+    certificateUrl: row.certificate_url,
+    monetaryValue: row.monetary_value,
+    isTeamAward: row.is_team_award ?? false,
+    teamMembers: ensureArray(row.team_members),
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as Award & Record<string, any>;
+}
+
+function rowProject(row: Record<string, any>): Project & Record<string, any> {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    projectName: row.project_name,
+    role: row.role,
+    startDate: rowTimestamp(row, "start_date"),
+    endDate: rowTimestamp(row, "end_date"),
+    status: row.status,
+    description: row.description,
+    technologies: row.technologies,
+    teamSize: row.team_size,
+    budget: row.budget,
+    client: row.client,
+    isInternal: row.is_internal ?? false,
+    notes: row.notes,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as Project & Record<string, any>;
+}
+
+function rowTrainingHours(row: Record<string, any>): TrainingHours {
+  return {
+    id: row.id,
+    year: row.year,
+    team: row.team,
+    trainingType: row.training_type,
+    hours: row.hours,
+    description: row.description,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as TrainingHours;
+}
+
+function rowTeamEmployees(row: Record<string, any>): TeamEmployees {
+  return {
+    id: row.id,
+    year: row.year,
+    team: row.team,
+    employeeCount: row.employee_count,
+    description: row.description,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  } as TeamEmployees;
+}
+
+function rowDepartment(row: Record<string, any>): DepartmentRecord {
+  return {
+    id: row.id,
+    code: row.department_code,
+    name: row.department_name,
+    description: row.description,
+    managerId: row.manager_id,
+    budget: row.budget,
+    location: row.location,
+    isActive: row.is_active ?? true,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  };
+}
+
+function rowTeam(row: Record<string, any>): TeamRecord {
+  return {
+    id: row.id,
+    code: row.team_code,
+    name: row.team_name,
+    departmentCode: row.department_code,
+    description: row.description,
+    teamLeadId: row.team_lead_id,
+    budget: row.budget,
+    location: row.location,
+    isActive: row.is_active ?? true,
+    createdAt: rowTimestamp(row, "created_at"),
+    updatedAt: rowTimestamp(row, "updated_at"),
+  };
+}
+
+function rowProposal(row: Record<string, any>): ProposalRecord {
+  const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+  return {
+    ...(payload ?? {}),
+    id: row.id,
+    employeeId: row.employee_id,
+    submissionDate: rowTimestamp(row, "submission_date") ?? payload?.submissionDate ?? null,
+    createdAt: rowTimestamp(row, "created_at") ?? payload?.createdAt ?? null,
+    updatedAt: rowTimestamp(row, "updated_at") ?? payload?.updatedAt ?? null,
+  };
+}
+
+async function queryOne<T>(
+  text: string,
+  values: any[],
+  mapper: (row: Record<string, any>) => T,
+): Promise<T | undefined> {
+  await databaseReady;
+  const result = await pool.query(text, values);
+  return result.rows[0] ? mapper(result.rows[0]) : undefined;
+}
+
+async function queryMany<T>(
+  text: string,
+  values: any[],
+  mapper: (row: Record<string, any>) => T,
+): Promise<T[]> {
+  await databaseReady;
+  const result = await pool.query(text, values);
+  return result.rows.map(mapper);
+}
 
 export interface IStorage {
-  // Employee methods
+  query(text: string, params?: any[]): Promise<any>;
   getEmployee(id: string): Promise<Employee | undefined>;
   getAllEmployees(): Promise<Employee[]>;
-  
-  // View state methods
-  saveViewState(viewState: any): void;
-  getViewState(): any;
+  getAllEmployeesIncludingInactive(): Promise<Employee[]>;
+  getEmployeesByDepartment(department: string): Promise<Employee[]>;
+  saveViewState(viewState: any): Promise<void>;
+  getViewState(): Promise<any>;
   createEmployee(employee: InsertEmployee): Promise<Employee>;
   updateEmployee(id: string, employee: Partial<InsertEmployee>): Promise<Employee>;
   deleteEmployee(id: string): Promise<boolean>;
-
-  // Training History methods
-  getTrainingHistory(id: string): Promise<TrainingHistory | undefined>;
+  getTrainingHistory(id: string): Promise<TrainingHistory | TrainingHistory[] | undefined>;
   getAllTrainingHistory(): Promise<TrainingHistory[]>;
   getTrainingHistoryByEmployee(employeeId: string): Promise<TrainingHistory[]>;
   createTrainingHistory(training: InsertTrainingHistory): Promise<TrainingHistory>;
   updateTrainingHistory(id: string, training: Partial<InsertTrainingHistory>): Promise<TrainingHistory>;
   deleteTrainingHistory(id: string): Promise<boolean>;
-
-  // Certification methods
   getCertification(id: string): Promise<Certification | undefined>;
   getAllCertifications(): Promise<Certification[]>;
   getCertificationsByEmployee(employeeId: string): Promise<Certification[]>;
@@ -56,1097 +467,1022 @@ export interface IStorage {
   updateCertification(id: string, certification: Partial<InsertCertification>): Promise<Certification>;
   deleteCertification(id: string): Promise<boolean>;
   deleteCertificationsByEmployee(employeeId: string): Promise<boolean>;
-
-  // Language methods
   getLanguage(id: string): Promise<Language | undefined>;
   getAllLanguages(): Promise<Language[]>;
+  getLanguages(employeeId: string): Promise<Language[]>;
   getLanguagesByEmployee(employeeId: string): Promise<Language[]>;
   createLanguage(language: InsertLanguage): Promise<Language>;
   updateLanguage(id: string, language: Partial<InsertLanguage>): Promise<Language>;
   deleteLanguage(id: string): Promise<boolean>;
   deleteLanguagesByEmployee(employeeId: string): Promise<boolean>;
-
-  // Skill methods
   getSkill(id: string): Promise<Skill | undefined>;
   getAllSkills(): Promise<Skill[]>;
   getSkillsByEmployee(employeeId: string): Promise<Skill[]>;
   createSkill(skill: InsertSkill): Promise<Skill>;
   updateSkill(id: string, skill: Partial<InsertSkill>): Promise<Skill>;
   deleteSkill(id: string): Promise<boolean>;
-
-  // Skill Calculation methods
   getSkillCalculation(id: string): Promise<SkillCalculation | undefined>;
   getAllSkillCalculations(): Promise<SkillCalculation[]>;
   getSkillCalculationsByEmployee(employeeId: string): Promise<SkillCalculation[]>;
   createSkillCalculation(calculation: InsertSkillCalculation): Promise<SkillCalculation>;
   updateSkillCalculation(id: string, calculation: Partial<InsertSkillCalculation>): Promise<SkillCalculation>;
   deleteSkillCalculation(id: string): Promise<boolean>;
-  
-  // Patent methods
-  getPatent(id: string): Promise<Patent | undefined>;
-  getAllPatents(): Promise<Patent[]>;
-  getPatentsByEmployee(employeeId: string): Promise<Patent[]>;
-  createPatent(patent: InsertPatent): Promise<Patent>;
-  updatePatent(id: string, patent: Partial<InsertPatent>): Promise<Patent>;
+  createOrUpdateSkillCalculation(calculation: InsertSkillCalculation): Promise<SkillCalculation>;
+  getPatent(id: string): Promise<any>;
+  getAllPatents(): Promise<any[]>;
+  getPatentsByEmployee(employeeId: string): Promise<any[]>;
+  createPatent(patent: InsertPatent | Record<string, any>): Promise<any>;
+  updatePatent(id: string, patent: Partial<InsertPatent> | Record<string, any>): Promise<any>;
   deletePatent(id: string): Promise<boolean>;
-  
-  // Publication methods
-  getPublication(id: string): Promise<Publication | undefined>;
-  getAllPublications(): Promise<Publication[]>;
-  getPublicationsByEmployee(employeeId: string): Promise<Publication[]>;
-  createPublication(publication: InsertPublication): Promise<Publication>;
-  updatePublication(id: string, publication: Partial<InsertPublication>): Promise<Publication>;
+  getPublication(id: string): Promise<any>;
+  getAllPublications(): Promise<any[]>;
+  getPublicationsByEmployee(employeeId: string): Promise<any[]>;
+  createPublication(publication: InsertPublication | Record<string, any>): Promise<any>;
+  updatePublication(id: string, publication: Partial<InsertPublication> | Record<string, any>): Promise<any>;
   deletePublication(id: string): Promise<boolean>;
-  
-  // Award methods
-  getAward(id: string): Promise<Award | undefined>;
-  getAllAwards(): Promise<Award[]>;
-  getAwardsByEmployee(employeeId: string): Promise<Award[]>;
-  createAward(award: InsertAward): Promise<Award>;
-  updateAward(id: string, award: Partial<InsertAward>): Promise<Award>;
+  getAward(id: string): Promise<any>;
+  getAllAwards(): Promise<any[]>;
+  getAwardsByEmployee(employeeId: string): Promise<any[]>;
+  createAward(award: InsertAward | Record<string, any>): Promise<any>;
+  updateAward(id: string, award: Partial<InsertAward> | Record<string, any>): Promise<any>;
   deleteAward(id: string): Promise<boolean>;
-  
-  // Project methods
-  getProject(id: string): Promise<Project | undefined>;
-  getAllProjects(): Promise<Project[]>;
-  getProjectsByEmployee(employeeId: string): Promise<Project[]>;
-  createProject(project: InsertProject): Promise<Project>;
-  updateProject(id: string, project: Partial<InsertProject>): Promise<Project>;
+  getProject(id: string): Promise<any>;
+  getAllProjects(): Promise<any[]>;
+  getProjectsByEmployee(employeeId: string): Promise<any[]>;
+  createProject(project: InsertProject | Record<string, any>): Promise<any>;
+  updateProject(id: string, project: Partial<InsertProject> | Record<string, any>): Promise<any>;
   deleteProject(id: string): Promise<boolean>;
-  
-  // Training Hours methods
   getTrainingHours(id: string): Promise<TrainingHours | undefined>;
   getAllTrainingHours(): Promise<TrainingHours[]>;
   getTrainingHoursByYearRange(startYear: number, endYear: number): Promise<TrainingHours[]>;
   createTrainingHours(trainingHours: InsertTrainingHours): Promise<TrainingHours>;
   updateTrainingHours(id: string, trainingHours: Partial<InsertTrainingHours>): Promise<TrainingHours>;
   deleteTrainingHours(id: string): Promise<boolean>;
-
-  // Team Employees methods
   getTeamEmployees(id: string): Promise<TeamEmployees | undefined>;
   getAllTeamEmployees(): Promise<TeamEmployees[]>;
   getTeamEmployeesByYearRange(startYear: number, endYear: number): Promise<TeamEmployees[]>;
   createTeamEmployees(teamEmployees: InsertTeamEmployees): Promise<TeamEmployees>;
   updateTeamEmployees(id: string, teamEmployees: Partial<InsertTeamEmployees>): Promise<TeamEmployees>;
   deleteTeamEmployees(id: string): Promise<boolean>;
-
-  // Full profile method
-  getEmployeeFullProfile(employeeId: string): Promise<{
-    employee: Employee;
-    trainingHistory: TrainingHistory[];
-    certifications: Certification[];
-    languages: Language[];
-    skills: Skill[];
-    skillCalculations: SkillCalculation[];
-    patents: Patent[];
-    publications: Publication[];
-    awards: Award[];
-    projects: Project[];
-  }>;
+  getEmployeeFullProfile(employeeId: string): Promise<any>;
+  getDepartments(): Promise<DepartmentRecord[]>;
+  createDepartment(department: DepartmentRecord): Promise<DepartmentRecord>;
+  updateDepartment(code: string, department: Partial<DepartmentRecord>): Promise<DepartmentRecord>;
+  deleteDepartment(code: string): Promise<boolean>;
+  getTeams(departmentCode?: string): Promise<TeamRecord[]>;
+  createTeam(team: TeamRecord): Promise<TeamRecord>;
+  updateTeam(code: string, team: Partial<TeamRecord>): Promise<TeamRecord>;
+  deleteTeam(code: string): Promise<boolean>;
+  getProposals(filters?: ProposalFilters): Promise<ProposalRecord[]>;
+  createProposal(proposal: ProposalRecord): Promise<ProposalRecord>;
+  deleteProposalsByEmployee(employeeId: string): Promise<number>;
+  getAppSetting<T = any>(key: string): Promise<T | null>;
+  setAppSetting(key: string, value: JsonValue): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private employees: Map<string, Employee>;
-  private trainingHistory: Map<string, TrainingHistory>;
-  private certifications: Map<string, Certification>;
-  private languages: Map<string, Language>;
-  private skills: Map<string, Skill>;
-  private skillCalculations: Map<string, SkillCalculation>;
-  private patents: Map<string, Patent>;
-  private publications: Map<string, Publication>;
-  private awards: Map<string, Award>;
-  private projects: Map<string, Project>;
-  private trainingHours: Map<string, TrainingHours>;
-  private teamEmployees: Map<string, TeamEmployees>;
-  private viewState: any;
-  private dataFile: string;
-
-  constructor() {
-    this.employees = new Map();
-    this.trainingHistory = new Map();
-    this.certifications = new Map();
-    this.languages = new Map();
-    this.skills = new Map();
-    this.skillCalculations = new Map();
-    this.patents = new Map();
-    this.publications = new Map();
-    this.awards = new Map();
-    this.projects = new Map();
-    this.trainingHours = new Map();
-    this.teamEmployees = new Map();
-    this.viewState = null;
-    this.dataFile = process.env.DATA_FILE_PATH || join(process.cwd(), "data.json");
-    
-    // Load data from file or initialize with sample data
-    this.loadData();
+export class PostgresStorage implements IStorage {
+  async query(text: string, params: any[] = []): Promise<any> {
+    await databaseReady;
+    return pool.query(text, params);
   }
 
-  private loadData() {
-    try {
-      mkdirSync(dirname(this.dataFile), { recursive: true });
-
-      
-      if (existsSync(this.dataFile)) {
-        const data = JSON.parse(readFileSync(this.dataFile, 'utf8'));
-        
-        // Load employees
-        if (data.employees) {
-          Object.entries(data.employees).forEach(([id, employee]) => {
-            this.employees.set(id, employee as Employee);
-          });
-        }
-        
-        // Load other data if exists
-        if (data.trainingHistory) {
-          Object.entries(data.trainingHistory).forEach(([id, item]) => {
-            this.trainingHistory.set(id, item as TrainingHistory);
-          });
-        }
-        
-        // Load certifications
-        if (data.certifications) {
-          Object.entries(data.certifications).forEach(([id, item]) => {
-            this.certifications.set(id, item as Certification);
-          });
-        }
-        
-        // Load languages
-        if (data.languages) {
-          Object.entries(data.languages).forEach(([id, item]) => {
-            this.languages.set(id, item as Language);
-          });
-        }
-        
-        // Load skills
-        if (data.skills) {
-          Object.entries(data.skills).forEach(([id, item]) => {
-            this.skills.set(id, item as Skill);
-          });
-        }
-        
-        // Load skill calculations
-        if (data.skillCalculations) {
-          Object.entries(data.skillCalculations).forEach(([id, item]) => {
-            this.skillCalculations.set(id, item as SkillCalculation);
-          });
-        }
-        
-        // Load patents
-        if (data.patents) {
-          Object.entries(data.patents).forEach(([id, item]) => {
-            this.patents.set(id, item as Patent);
-          });
-        }
-        
-        // Load publications
-        if (data.publications) {
-          Object.entries(data.publications).forEach(([id, item]) => {
-            this.publications.set(id, item as Publication);
-          });
-        }
-        
-        // Load awards
-        if (data.awards) {
-          Object.entries(data.awards).forEach(([id, item]) => {
-            this.awards.set(id, item as Award);
-          });
-        }
-        
-        // Load projects
-        if (data.projects) {
-          Object.entries(data.projects).forEach(([id, item]) => {
-            this.projects.set(id, item as Project);
-          });
-        }
-        
-        // Load training hours
-        if (data.trainingHours) {
-          Object.entries(data.trainingHours).forEach(([id, item]) => {
-            this.trainingHours.set(id, item as TrainingHours);
-          });
-        }
-        
-        // Load team employees
-        if (data.teamEmployees) {
-          Object.entries(data.teamEmployees).forEach(([id, item]) => {
-            this.teamEmployees.set(id, item as TeamEmployees);
-          });
-        }
-        
-        // Load view state if exists
-        if (data.viewState) {
-          this.viewState = data.viewState;
-        }
-        
-        return;
-      } else {
-      }
-    } catch (error) {
-      console.error('❌ 데이터 파일 로드 실패:', error);
-    }
-    
-    // Initialize with sample data if no file exists
-    this.initializeSampleData();
-  }
-
-  private saveData() {
-    try {
-      // 1. 기존 파일 전체 로드
-      mkdirSync(dirname(this.dataFile), { recursive: true });
-      let existingData = {};
-      if (existsSync(this.dataFile)) {
-        const fileContent = readFileSync(this.dataFile, 'utf8');
-        existingData = JSON.parse(fileContent);
-      }
-      
-      // 2. Storage가 관리하는 필드만 업데이트 (기존 데이터는 모두 보존)
-      const data = {
-        ...existingData,  // 기존 데이터 전체 보존 (rdEvaluationCriteria, detailedCriteria 등 포함)
-        // Storage가 관리하는 필드만 덮어쓰기
-        employees: Object.fromEntries(this.employees),
-        trainingHistory: Object.fromEntries(this.trainingHistory),
-        certifications: Object.fromEntries(this.certifications),
-        languages: Object.fromEntries(this.languages),
-        skills: Object.fromEntries(this.skills),
-        skillCalculations: Object.fromEntries(this.skillCalculations),
-        patents: Object.fromEntries(this.patents),
-        publications: Object.fromEntries(this.publications),
-        awards: Object.fromEntries(this.awards),
-        projects: Object.fromEntries(this.projects),
-        trainingHours: Object.fromEntries(this.trainingHours),
-        teamEmployees: Object.fromEntries(this.teamEmployees),
-        viewState: this.viewState
-      };
-      
-      writeFileSync(this.dataFile, JSON.stringify(data, null, 2));
-    } catch (error) {
-      console.error('❌ 데이터 파일 저장 실패:', error);
-    }
-  }
-
-  private initializeSampleData() {
-    // 체계적인 조직 구조: 지사장 -> 4개 부문장 -> 팀장 -> 팀원
-    // 고유 코드 체계:
-    // - 부서 코드: HQ(본사), SL(영업), RD(연구), QC(품질), PM(생산)
-    // - 팀 코드: 부서코드 + 2자리 숫자 (예: SL01, RD01)
-    // - 직원 ID: emp + 2자리 숫자 (emp00 ~ emp99)
-    const sampleEmployees: Employee[] = [
-      // 지사장 (최상위)
-      {
-        id: "emp0",
-        employeeNumber: "000",
-        departmentCode: "HQ",
-        teamCode: null,
-        name: "이지사",
-        position: "지사장",
-        department: "본사",
-        team: null,
-        email: "lee.ceo@ashimori.co.kr",
-        phone: "010-0000-0000",
-        hireDate: new Date("2015-01-01"),
-        managerId: null,
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 영업부문장
-      {
-        id: "emp1",
-        employeeNumber: "001",
-        departmentCode: "SL",
-        teamCode: null,
-        name: "김영업",
-        position: "영업부문장",
-        department: "영업부문",
-        team: null,
-        email: "kim.sales@ashimori.co.kr",
-        phone: "010-1234-5678",
-        hireDate: new Date("2018-03-15"),
-        managerId: "emp0",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 연구소장
-      {
-        id: "emp2",
-        employeeNumber: "002",
-        departmentCode: "RD",
-        teamCode: null,
-        name: "박연구",
-        position: "연구소장",
-        department: "연구소",
-        team: null,
-        email: "park.rd@ashimori.co.kr",
-        phone: "010-2345-6789",
-        hireDate: new Date("2019-07-01"),
-        managerId: "emp0",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 품질부문장
-      {
-        id: "emp3",
-        employeeNumber: "003",
-        departmentCode: "QC",
-        teamCode: null,
-        name: "이품질",
-        position: "품질부문장",
-        department: "품질부문",
-        team: null,
-        email: "lee.qc@ashimori.co.kr",
-        phone: "010-3456-7890",
-        hireDate: new Date("2017-11-20"),
-        managerId: "emp0",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 생산관리부문장
-      {
-        id: "emp4",
-        employeeNumber: "004",
-        departmentCode: "PM",
-        teamCode: null,
-        name: "정생산",
-        position: "생산관리부문장",
-        department: "생산관리부문",
-        team: null,
-        email: "jung.pm@ashimori.co.kr",
-        phone: "010-4567-8901",
-        hireDate: new Date("2016-09-10"),
-        managerId: "emp0",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 영업부문 하위 팀장들
-      {
-        id: "emp5",
-        employeeNumber: "005",
-        departmentCode: "SL",
-        teamCode: "SL01",
-        name: "최영업",
-        position: "국내영업팀장",
-        department: "영업부문",
-        team: "국내영업팀",
-        email: "choi.sales@ashimori.co.kr",
-        phone: "010-5678-9012",
-        hireDate: new Date("2020-02-15"),
-        managerId: "emp1",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      {
-        id: "emp6",
-        employeeNumber: "006",
-        departmentCode: "SL",
-        teamCode: "SL02",
-        name: "한해외",
-        position: "해외영업팀장",
-        department: "영업부문",
-        team: "해외영업팀",
-        email: "han.overseas@ashimori.co.kr",
-        phone: "010-6789-0123",
-        hireDate: new Date("2019-05-20"),
-        managerId: "emp1",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 연구소 하위 팀장들
-      {
-        id: "emp7",
-        employeeNumber: "007",
-        departmentCode: "RD",
-        teamCode: "RD01",
-        name: "김개발",
-        position: "개발팀장",
-        department: "연구소",
-        team: "개발팀",
-        email: "kim.dev@ashimori.co.kr",
-        phone: "010-7890-1234",
-        hireDate: new Date("2020-08-10"),
-        managerId: "emp2",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      {
-        id: "emp8",
-        employeeNumber: "008",
-        departmentCode: "RD",
-        teamCode: "RD02",
-        name: "박연구",
-        position: "연구팀장",
-        department: "연구소",
-        team: "연구팀",
-        email: "park.research@ashimori.co.kr",
-        phone: "010-8901-2345",
-        hireDate: new Date("2018-12-01"),
-        managerId: "emp2",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 품질부문 하위 팀장들
-      {
-        id: "emp9",
-        employeeNumber: "009",
-        departmentCode: "QC",
-        teamCode: "QC01",
-        name: "이품질",
-        position: "품질관리팀장",
-        department: "품질부문",
-        team: "품질관리팀",
-        email: "lee.quality@ashimori.co.kr",
-        phone: "010-9012-3456",
-        hireDate: new Date("2019-03-15"),
-        managerId: "emp3",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 생산관리부문 하위 팀장들
-      {
-        id: "emp10",
-        employeeNumber: "010",
-        departmentCode: "PM",
-        teamCode: "PM01",
-        name: "정생산",
-        position: "생산팀장",
-        department: "생산관리부문",
-        team: "생산팀",
-        email: "jung.production@ashimori.co.kr",
-        phone: "010-0123-4567",
-        hireDate: new Date("2017-06-01"),
-        managerId: "emp4",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 팀원들 (각 팀장 하위)
-      {
-        id: "emp11",
-        employeeNumber: "011",
-        departmentCode: "SL",
-        teamCode: "SL01",
-        name: "김국내",
-        position: "국내영업팀 사원",
-        department: "영업부문",
-        team: "국내영업팀",
-        email: "kim.domestic@ashimori.co.kr",
-        phone: "010-1234-5678",
-        hireDate: new Date("2021-01-15"),
-        managerId: "emp5",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      {
-        id: "emp12",
-        employeeNumber: "012",
-        departmentCode: "RD",
-        teamCode: "RD01",
-        name: "박개발",
-        position: "개발팀 사원",
-        department: "연구소",
-        team: "개발팀",
-        email: "park.dev@ashimori.co.kr",
-        phone: "010-2345-6789",
-        hireDate: new Date("2021-07-01"),
-        managerId: "emp7",
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      
-      // 연구소 추가 직원들 (R&D 인원 34명을 위한 샘플 데이터)
-      ...Array.from({ length: 30 }, (_, i) => ({
-        id: `emp${13 + i}`,
-        employeeNumber: `${13 + i}`.padStart(3, '0'),
-        departmentCode: "RD",
-        teamCode: i < 15 ? "RD01" : "RD02", // 개발팀 15명, 연구팀 15명
-        name: i < 15 ? `개발자${i + 1}` : `연구원${i - 14}`,
-        position: i < 15 ? "개발팀 사원" : "연구팀 사원",
-        department: "연구소",
-        team: i < 15 ? "개발팀" : "연구팀",
-        email: i < 15 ? `dev${i + 1}@ashimori.co.kr` : `research${i - 14}@ashimori.co.kr`,
-        phone: `010-${String(1000 + i).padStart(4, '0')}-${String(1000 + i).padStart(4, '0')}`,
-        hireDate: new Date(`202${Math.floor(i / 10)}-${String((i % 12) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`),
-        managerId: i < 15 ? "emp7" : "emp8", // 개발팀장 또는 연구팀장
-        photoUrl: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }))
-    ];
-
-    // Store sample employees
-    sampleEmployees.forEach(emp => this.employees.set(emp.id, emp));
-  }
-
-  // Employee methods
   async getEmployee(id: string): Promise<Employee | undefined> {
-    return this.employees.get(id);
+    return queryOne("SELECT * FROM employees WHERE id = $1", [id], rowEmployee);
   }
 
   async getAllEmployees(): Promise<Employee[]> {
-    return Array.from(this.employees.values()).filter(employee => employee.isActive !== false);
+    return queryMany(
+      "SELECT * FROM employees WHERE is_active = true ORDER BY employee_number",
+      [],
+      rowEmployee,
+    );
   }
 
-  // 모든 직원 조회 (비활성 포함) - 직원 관리 페이지용
   async getAllEmployeesIncludingInactive(): Promise<Employee[]> {
-    return Array.from(this.employees.values());
+    return queryMany("SELECT * FROM employees ORDER BY employee_number", [], rowEmployee);
+  }
+
+  async getEmployeesByDepartment(department: string): Promise<Employee[]> {
+    return queryMany(
+      `SELECT * FROM employees
+       WHERE department = $1 OR department_code = $1
+       ORDER BY employee_number`,
+      [department],
+      rowEmployee,
+    );
+  }
+
+  async saveViewState(viewState: any): Promise<void> {
+    await this.setAppSetting("viewState", viewState);
+  }
+
+  async getViewState(): Promise<any> {
+    return this.getAppSetting("viewState");
   }
 
   async createEmployee(employee: InsertEmployee): Promise<Employee> {
-    const id = randomUUID();
-    const newEmployee: Employee = {
-      id,
-      ...employee,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.employees.set(id, newEmployee);
-    
-    // 파일에 영구 저장
-    this.saveData();
-    
-    return newEmployee;
+    await databaseReady;
+    const id = (employee as any).id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO employees (
+        id, employee_number, department_code, team_code, name, position, department, team,
+        email, phone, hire_date, birth_date, manager_id, photo_url, education, major, school,
+        graduation_year, previous_experience_years, previous_experience_months,
+        is_department_head, is_active
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,
+        $9,$10,$11,$12,$13,$14,$15,$16,$17,
+        $18,$19,$20,$21,$22
+      ) RETURNING *`,
+      [
+        id,
+        employee.employeeNumber,
+        employee.departmentCode,
+        employee.teamCode ?? null,
+        employee.name,
+        employee.position,
+        employee.department,
+        employee.team ?? null,
+        employee.email ?? null,
+        employee.phone ?? null,
+        toDate((employee as any).hireDate),
+        toDate((employee as any).birthDate),
+        employee.managerId ?? null,
+        employee.photoUrl ?? null,
+        (employee as any).education ?? null,
+        (employee as any).major ?? null,
+        (employee as any).school ?? null,
+        toInteger((employee as any).graduationYear),
+        toInteger((employee as any).previousExperienceYears) ?? 0,
+        toInteger((employee as any).previousExperienceMonths) ?? 0,
+        (employee as any).isDepartmentHead ?? false,
+        employee.isActive ?? true,
+      ],
+    );
+
+    return rowEmployee(result.rows[0]);
   }
 
   async updateEmployee(id: string, employee: Partial<InsertEmployee>): Promise<Employee> {
-    
-    const existing = this.employees.get(id);
-    if (!existing) {
-      throw new Error(`Employee ${id} not found`);
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_number: employee.employeeNumber,
+      department_code: employee.departmentCode,
+      team_code: employee.teamCode,
+      name: employee.name,
+      position: employee.position,
+      department: employee.department,
+      team: employee.team,
+      email: employee.email,
+      phone: employee.phone,
+      hire_date: toDate((employee as any).hireDate),
+      birth_date: toDate((employee as any).birthDate),
+      manager_id: employee.managerId,
+      photo_url: employee.photoUrl,
+      education: (employee as any).education,
+      major: (employee as any).major,
+      school: (employee as any).school,
+      graduation_year: toInteger((employee as any).graduationYear),
+      previous_experience_years: toInteger((employee as any).previousExperienceYears),
+      previous_experience_months: toInteger((employee as any).previousExperienceMonths),
+      is_department_head: (employee as any).isDepartmentHead,
+      is_active: employee.isActive,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getEmployee(id);
+      if (!existing) throw new Error("Employee not found");
+      return existing;
     }
-    
-    
-    const updated: Employee = {
-      ...existing,
-      ...employee,
-      updatedAt: new Date()
-    };
-    
-    
-    this.employees.set(id, updated);
-    
-    // 파일에 영구 저장
-    this.saveData();
-    
-    
-    return updated;
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE employees SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Employee not found");
+    return rowEmployee(result.rows[0]);
   }
 
   async deleteEmployee(id: string): Promise<boolean> {
-    return this.employees.delete(id);
+    await databaseReady;
+    const result = await pool.query("DELETE FROM employees WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Training History methods
-  async getTrainingHistory(id: string): Promise<TrainingHistory | undefined> {
-    return this.trainingHistory.get(id);
+  async getTrainingHistory(id: string): Promise<TrainingHistory | TrainingHistory[] | undefined> {
+    const direct = await queryOne("SELECT * FROM training_history WHERE id = $1", [id], rowTraining);
+    if (direct) return direct;
+    return this.getTrainingHistoryByEmployee(id);
   }
 
   async getAllTrainingHistory(): Promise<TrainingHistory[]> {
-    return Array.from(this.trainingHistory.values());
+    return queryMany("SELECT * FROM training_history ORDER BY completion_date DESC NULLS LAST, created_at DESC", [], rowTraining);
   }
 
   async getTrainingHistoryByEmployee(employeeId: string): Promise<TrainingHistory[]> {
-    return Array.from(this.trainingHistory.values()).filter(t => t.employeeId === employeeId);
+    return queryMany(
+      "SELECT * FROM training_history WHERE employee_id = $1 ORDER BY completion_date DESC NULLS LAST, created_at DESC",
+      [employeeId],
+      rowTraining,
+    );
   }
 
   async createTrainingHistory(training: InsertTrainingHistory): Promise<TrainingHistory> {
-    const id = randomUUID();
-    const newTraining: TrainingHistory = {
-      id,
-      ...training,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.trainingHistory.set(id, newTraining);
-    this.saveData(); // 데이터 저장
-    return newTraining;
+    await databaseReady;
+    const id = (training as any).id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO training_history (
+        id, employee_id, course_name, provider, type, category,
+        start_date, completion_date, duration, score, status, instructor_role,
+        certificate_url, notes
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,
+        $7,$8,$9,$10,$11,$12,
+        $13,$14
+      ) RETURNING *`,
+      [
+        id,
+        training.employeeId,
+        training.courseName,
+        training.provider,
+        training.type,
+        training.category,
+        toDate((training as any).startDate),
+        toDate((training as any).completionDate),
+        toInteger(training.duration),
+        toNumber(training.score),
+        training.status ?? "planned",
+        (training as any).instructorRole ?? null,
+        training.certificateUrl ?? null,
+        training.notes ?? null,
+      ],
+    );
+    return rowTraining(result.rows[0]);
   }
 
   async updateTrainingHistory(id: string, training: Partial<InsertTrainingHistory>): Promise<TrainingHistory> {
-    const existing = this.trainingHistory.get(id);
-    if (!existing) throw new Error('Training history not found');
-    
-    const updated: TrainingHistory = {
-      ...existing,
-      ...training,
-      updatedAt: new Date()
-    };
-    this.trainingHistory.set(id, updated);
-    this.saveData(); // 데이터 저장
-    return updated;
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: training.employeeId,
+      course_name: training.courseName,
+      provider: training.provider,
+      type: training.type,
+      category: training.category,
+      start_date: toDate((training as any).startDate),
+      completion_date: toDate((training as any).completionDate),
+      duration: toInteger(training.duration),
+      score: toNumber(training.score),
+      status: training.status,
+      instructor_role: (training as any).instructorRole,
+      certificate_url: training.certificateUrl,
+      notes: training.notes,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getTrainingHistory(id);
+      if (!existing || Array.isArray(existing)) throw new Error("Training history not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE training_history SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Training history not found");
+    return rowTraining(result.rows[0]);
   }
 
   async deleteTrainingHistory(id: string): Promise<boolean> {
-    const result = this.trainingHistory.delete(id);
-    this.saveData(); // 데이터 저장
-    return result;
+    await databaseReady;
+    const result = await pool.query("DELETE FROM training_history WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Certification methods
   async getCertification(id: string): Promise<Certification | undefined> {
-    return this.certifications.get(id);
+    return queryOne("SELECT * FROM certifications WHERE id = $1", [id], rowCertification);
   }
 
   async getAllCertifications(): Promise<Certification[]> {
-    return Array.from(this.certifications.values());
+    return queryMany("SELECT * FROM certifications ORDER BY created_at DESC", [], rowCertification);
   }
 
   async getCertificationsByEmployee(employeeId: string): Promise<Certification[]> {
-    return Array.from(this.certifications.values()).filter(c => c.employeeId === employeeId);
+    return queryMany("SELECT * FROM certifications WHERE employee_id = $1 ORDER BY created_at DESC", [employeeId], rowCertification);
   }
 
   async createCertification(certification: InsertCertification): Promise<Certification> {
-    const id = randomUUID();
-    const newCertification: Certification = {
-      id,
-      ...certification,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.certifications.set(id, newCertification);
-    this.saveData(); // 데이터 저장
-    return newCertification;
+    await databaseReady;
+    const id = (certification as any).id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO certifications (
+        id, employee_id, name, issuer, issue_date, expiry_date, credential_id, verification_url,
+        category, level, score, score_at_acquisition, scoring_criteria_version, use_fixed_score, is_active
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,
+        $9,$10,$11,$12,$13,$14,$15
+      ) RETURNING *`,
+      [
+        id,
+        certification.employeeId,
+        certification.name,
+        certification.issuer,
+        toDate((certification as any).issueDate),
+        toDate((certification as any).expiryDate),
+        certification.credentialId ?? null,
+        certification.verificationUrl ?? null,
+        certification.category,
+        certification.level ?? null,
+        toNumber(certification.score),
+        toNumber((certification as any).scoreAtAcquisition),
+        (certification as any).scoringCriteriaVersion ?? null,
+        (certification as any).useFixedScore ?? true,
+        certification.isActive ?? true,
+      ],
+    );
+    return rowCertification(result.rows[0]);
   }
 
   async updateCertification(id: string, certification: Partial<InsertCertification>): Promise<Certification> {
-    console.log('🔍 storage.updateCertification 호출:', { id, certification });
-    
-    const existing = this.certifications.get(id);
-    if (!existing) {
-      console.error('❌ 자격증을 찾을 수 없습니다:', id);
-      throw new Error('Certification not found');
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: certification.employeeId,
+      name: certification.name,
+      issuer: certification.issuer,
+      issue_date: toDate((certification as any).issueDate),
+      expiry_date: toDate((certification as any).expiryDate),
+      credential_id: certification.credentialId,
+      verification_url: certification.verificationUrl,
+      category: certification.category,
+      level: certification.level,
+      score: toNumber(certification.score),
+      score_at_acquisition: toNumber((certification as any).scoreAtAcquisition),
+      scoring_criteria_version: (certification as any).scoringCriteriaVersion,
+      use_fixed_score: (certification as any).useFixedScore,
+      is_active: certification.isActive,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getCertification(id);
+      if (!existing) throw new Error("Certification not found");
+      return existing;
     }
-    
-    console.log('🔍 기존 자격증:', existing);
-    
-    const updated: Certification = {
-      ...existing,
-      ...certification,
-      updatedAt: new Date()
-    };
-    
-    console.log('🔍 업데이트된 자격증:', updated);
-    
-    this.certifications.set(id, updated);
-    console.log('🔍 saveData() 호출 시작');
-    this.saveData(); // 데이터 저장
-    console.log('✅ saveData() 완료');
-    
-    return updated;
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE certifications SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Certification not found");
+    return rowCertification(result.rows[0]);
   }
 
   async deleteCertification(id: string): Promise<boolean> {
-    const result = this.certifications.delete(id);
-    this.saveData(); // 데이터 저장
-    return result;
+    await databaseReady;
+    const result = await pool.query("DELETE FROM certifications WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   async deleteCertificationsByEmployee(employeeId: string): Promise<boolean> {
-    const certificationsToDelete = Array.from(this.certifications.values())
-      .filter(c => c.employeeId === employeeId);
-    
-    for (const certification of certificationsToDelete) {
-      this.certifications.delete(certification.id);
-    }
-    
-    this.saveData(); // 데이터 저장
+    await databaseReady;
+    await pool.query("DELETE FROM certifications WHERE employee_id = $1", [employeeId]);
     return true;
   }
 
-  // Language methods
   async getLanguage(id: string): Promise<Language | undefined> {
-    return this.languages.get(id);
+    return queryOne("SELECT * FROM languages WHERE id = $1", [id], rowLanguage);
   }
 
   async getAllLanguages(): Promise<Language[]> {
-    return Array.from(this.languages.values());
+    return queryMany("SELECT * FROM languages ORDER BY created_at DESC", [], rowLanguage);
+  }
+
+  async getLanguages(employeeId: string): Promise<Language[]> {
+    return this.getLanguagesByEmployee(employeeId);
   }
 
   async getLanguagesByEmployee(employeeId: string): Promise<Language[]> {
-    return Array.from(this.languages.values()).filter(l => l.employeeId === employeeId);
+    return queryMany("SELECT * FROM languages WHERE employee_id = $1 ORDER BY created_at DESC", [employeeId], rowLanguage);
   }
 
   async createLanguage(language: InsertLanguage): Promise<Language> {
-    const id = randomUUID();
-    const newLanguage: Language = {
-      id,
-      ...language,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.languages.set(id, newLanguage);
-    this.saveData(); // 데이터 저장
-    return newLanguage;
+    await databaseReady;
+    const id = (language as any).id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO languages (
+        id, employee_id, language, proficiency_level, test_type, test_level,
+        score, max_score, test_date, certificate_url, is_active
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,
+        $7,$8,$9,$10,$11
+      ) RETURNING *`,
+      [
+        id,
+        language.employeeId,
+        language.language,
+        language.proficiencyLevel,
+        language.testType ?? null,
+        language.testLevel ?? null,
+        toInteger(language.score),
+        toInteger(language.maxScore),
+        toDate((language as any).testDate),
+        language.certificateUrl ?? null,
+        language.isActive ?? true,
+      ],
+    );
+    return rowLanguage(result.rows[0]);
   }
 
   async updateLanguage(id: string, language: Partial<InsertLanguage>): Promise<Language> {
-    const existing = this.languages.get(id);
-    if (!existing) throw new Error('Language not found');
-    
-    const updated: Language = {
-      ...existing,
-      ...language,
-      updatedAt: new Date()
-    };
-    this.languages.set(id, updated);
-    this.saveData(); // 데이터 저장
-    return updated;
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: language.employeeId,
+      language: language.language,
+      proficiency_level: language.proficiencyLevel,
+      test_type: language.testType,
+      test_level: language.testLevel,
+      score: toInteger(language.score),
+      max_score: toInteger(language.maxScore),
+      test_date: toDate((language as any).testDate),
+      certificate_url: language.certificateUrl,
+      is_active: language.isActive,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getLanguage(id);
+      if (!existing) throw new Error("Language not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE languages SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Language not found");
+    return rowLanguage(result.rows[0]);
   }
 
   async deleteLanguage(id: string): Promise<boolean> {
-    const result = this.languages.delete(id);
-    this.saveData(); // 데이터 저장
-    return result;
+    await databaseReady;
+    const result = await pool.query("DELETE FROM languages WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   async deleteLanguagesByEmployee(employeeId: string): Promise<boolean> {
-    const languagesToDelete = Array.from(this.languages.values())
-      .filter(l => l.employeeId === employeeId);
-    
-    for (const language of languagesToDelete) {
-      this.languages.delete(language.id);
-    }
-    
-    this.saveData(); // 데이터 저장
+    await databaseReady;
+    await pool.query("DELETE FROM languages WHERE employee_id = $1", [employeeId]);
     return true;
   }
 
-  // Skill methods
   async getSkill(id: string): Promise<Skill | undefined> {
-    return this.skills.get(id);
+    return queryOne("SELECT * FROM skills WHERE id = $1", [id], rowSkill);
   }
 
   async getAllSkills(): Promise<Skill[]> {
-    return Array.from(this.skills.values());
+    return queryMany("SELECT * FROM skills ORDER BY created_at DESC", [], rowSkill);
   }
 
   async getSkillsByEmployee(employeeId: string): Promise<Skill[]> {
-    return Array.from(this.skills.values()).filter(s => s.employeeId === employeeId);
+    return queryMany("SELECT * FROM skills WHERE employee_id = $1 ORDER BY created_at DESC", [employeeId], rowSkill);
   }
 
   async createSkill(skill: InsertSkill): Promise<Skill> {
-    const id = randomUUID();
-    const newSkill: Skill = {
-      id,
-      ...skill,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.skills.set(id, newSkill);
-    this.saveData(); // 데이터 저장
-    return newSkill;
+    await databaseReady;
+    const id = (skill as any).id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO skills (
+        id, employee_id, skill_type, skill_name, proficiency_level,
+        years_of_experience, last_assessed_date, assessed_by, notes, is_active
+      ) VALUES (
+        $1,$2,$3,$4,$5,
+        $6,$7,$8,$9,$10
+      ) RETURNING *`,
+      [
+        id,
+        skill.employeeId,
+        skill.skillType,
+        skill.skillName,
+        skill.proficiencyLevel,
+        toNumber(skill.yearsOfExperience),
+        toDate((skill as any).lastAssessedDate),
+        skill.assessedBy ?? null,
+        skill.notes ?? null,
+        skill.isActive ?? true,
+      ],
+    );
+    return rowSkill(result.rows[0]);
   }
 
   async updateSkill(id: string, skill: Partial<InsertSkill>): Promise<Skill> {
-    const existing = this.skills.get(id);
-    if (!existing) throw new Error('Skill not found');
-    
-    const updated: Skill = {
-      ...existing,
-      ...skill,
-      updatedAt: new Date()
-    };
-    this.skills.set(id, updated);
-    this.saveData(); // 데이터 저장
-    return updated;
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: skill.employeeId,
+      skill_type: skill.skillType,
+      skill_name: skill.skillName,
+      proficiency_level: toInteger(skill.proficiencyLevel),
+      years_of_experience: toNumber(skill.yearsOfExperience),
+      last_assessed_date: toDate((skill as any).lastAssessedDate),
+      assessed_by: skill.assessedBy,
+      notes: skill.notes,
+      is_active: skill.isActive,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getSkill(id);
+      if (!existing) throw new Error("Skill not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE skills SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Skill not found");
+    return rowSkill(result.rows[0]);
   }
 
   async deleteSkill(id: string): Promise<boolean> {
-    const result = this.skills.delete(id);
-    this.saveData(); // 데이터 저장
-    return result;
+    await databaseReady;
+    const result = await pool.query("DELETE FROM skills WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Skill Calculation methods
   async getSkillCalculation(id: string): Promise<SkillCalculation | undefined> {
-    return this.skillCalculations.get(id);
+    const byEmployee = await queryOne("SELECT * FROM skill_calculations WHERE employee_id = $1", [id], rowSkillCalculation);
+    if (byEmployee) return byEmployee;
+    return queryOne("SELECT * FROM skill_calculations WHERE id = $1", [id], rowSkillCalculation);
   }
 
   async getAllSkillCalculations(): Promise<SkillCalculation[]> {
-    return Array.from(this.skillCalculations.values());
+    return queryMany("SELECT * FROM skill_calculations ORDER BY last_calculated_at DESC", [], rowSkillCalculation);
   }
 
   async getSkillCalculationsByEmployee(employeeId: string): Promise<SkillCalculation[]> {
-    return Array.from(this.skillCalculations.values()).filter(sc => sc.employeeId === employeeId);
+    return queryMany("SELECT * FROM skill_calculations WHERE employee_id = $1 ORDER BY last_calculated_at DESC", [employeeId], rowSkillCalculation);
   }
 
   async createSkillCalculation(calculation: InsertSkillCalculation): Promise<SkillCalculation> {
-    const id = randomUUID();
-    const newCalculation: SkillCalculation = {
-      id,
-      ...calculation,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.skillCalculations.set(id, newCalculation);
-    return newCalculation;
+    await databaseReady;
+    const id = (calculation as any).id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO skill_calculations (
+        id, employee_id, experience_score, certification_score, language_score,
+        training_score, technical_score, soft_skill_score, overall_score, calculated_by
+      ) VALUES (
+        $1,$2,$3,$4,$5,
+        $6,$7,$8,$9,$10
+      )
+      ON CONFLICT (employee_id) DO UPDATE SET
+        experience_score = EXCLUDED.experience_score,
+        certification_score = EXCLUDED.certification_score,
+        language_score = EXCLUDED.language_score,
+        training_score = EXCLUDED.training_score,
+        technical_score = EXCLUDED.technical_score,
+        soft_skill_score = EXCLUDED.soft_skill_score,
+        overall_score = EXCLUDED.overall_score,
+        calculated_by = EXCLUDED.calculated_by,
+        last_calculated_at = NOW()
+      RETURNING *`,
+      [
+        id,
+        calculation.employeeId,
+        calculation.experienceScore ?? 0,
+        calculation.certificationScore ?? 0,
+        calculation.languageScore ?? 0,
+        calculation.trainingScore ?? 0,
+        calculation.technicalScore ?? 0,
+        calculation.softSkillScore ?? 0,
+        calculation.overallScore ?? 0,
+        calculation.calculatedBy ?? null,
+      ],
+    );
+    return rowSkillCalculation(result.rows[0]);
   }
 
   async updateSkillCalculation(id: string, calculation: Partial<InsertSkillCalculation>): Promise<SkillCalculation> {
-    const existing = this.skillCalculations.get(id);
-    if (!existing) throw new Error('Skill calculation not found');
-    
-      const updated: SkillCalculation = {
-        ...existing,
-      ...calculation,
-      updatedAt: new Date()
-    };
-    this.skillCalculations.set(id, updated);
-    return updated;
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: calculation.employeeId,
+      experience_score: toNumber(calculation.experienceScore),
+      certification_score: toNumber(calculation.certificationScore),
+      language_score: toNumber(calculation.languageScore),
+      training_score: toNumber(calculation.trainingScore),
+      technical_score: toNumber(calculation.technicalScore),
+      soft_skill_score: toNumber(calculation.softSkillScore),
+      overall_score: toNumber(calculation.overallScore),
+      calculated_by: calculation.calculatedBy,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getSkillCalculation(id);
+      if (!existing) throw new Error("Skill calculation not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("last_calculated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE skill_calculations SET ${setClause} WHERE id = $1 OR employee_id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Skill calculation not found");
+    return rowSkillCalculation(result.rows[0]);
   }
 
   async deleteSkillCalculation(id: string): Promise<boolean> {
-    return this.skillCalculations.delete(id);
+    await databaseReady;
+    const result = await pool.query("DELETE FROM skill_calculations WHERE id = $1 OR employee_id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Patent methods
-  async getPatent(id: string): Promise<Patent | undefined> {
-    return this.patents.get(id);
+  async createOrUpdateSkillCalculation(calculation: InsertSkillCalculation): Promise<SkillCalculation> {
+    return this.createSkillCalculation(calculation);
   }
 
-  async getAllPatents(): Promise<Patent[]> {
-    return Array.from(this.patents.values());
+  async getPatent(id: string): Promise<any> {
+    return queryOne("SELECT * FROM patents WHERE id = $1", [id], rowPatent);
   }
 
-  async getPatentsByEmployee(employeeId: string): Promise<Patent[]> {
-    return Array.from(this.patents.values()).filter(p => p.employeeId === employeeId);
+  async getAllPatents(): Promise<any[]> {
+    return queryMany("SELECT * FROM patents ORDER BY application_date DESC NULLS LAST, created_at DESC", [], rowPatent);
   }
 
-  async createPatent(patent: InsertPatent): Promise<Patent> {
-    const id = randomUUID();
-    const newPatent: Patent = {
-      id,
-      ...patent,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.patents.set(id, newPatent);
-    this.saveData(); // 데이터 저장
-    return newPatent;
+  async getPatentsByEmployee(employeeId: string): Promise<any[]> {
+    return queryMany("SELECT * FROM patents WHERE employee_id = $1 ORDER BY application_date DESC NULLS LAST, created_at DESC", [employeeId], rowPatent);
   }
 
-  async updatePatent(id: string, patent: Partial<InsertPatent>): Promise<Patent> {
-    const existing = this.patents.get(id);
-    if (!existing) throw new Error('Patent not found');
-    
-    const updated: Patent = {
-      ...existing,
-      ...patent,
-      updatedAt: new Date()
-    };
-    this.patents.set(id, updated);
-    this.saveData(); // 데이터 저장
-    return updated;
+  async createPatent(patent: InsertPatent | Record<string, any>): Promise<any> {
+    await databaseReady;
+    const id = patent.id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO patents (
+        id, employee_id, title, application_number, patent_number, status,
+        application_date, registration_date, inventors, description, category, priority, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,
+        $7,$8,$9::jsonb,$10,$11,$12,NOW()
+      ) RETURNING *`,
+      [
+        id,
+        patent.employeeId,
+        patent.title,
+        patent.applicationNumber ?? null,
+        patent.patentNumber ?? null,
+        patent.status ?? "pending",
+        toDate(patent.applicationDate),
+        toDate((patent as any).registrationDate ?? (patent as any).grantDate),
+        JSON.stringify(ensureArray((patent as any).inventors)),
+        patent.description ?? null,
+        patent.category ?? null,
+        (patent as any).priority ?? null,
+      ],
+    );
+    return rowPatent(result.rows[0]);
+  }
+
+  async updatePatent(id: string, patent: Partial<InsertPatent> | Record<string, any>): Promise<any> {
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: patent.employeeId,
+      title: patent.title,
+      application_number: patent.applicationNumber,
+      patent_number: patent.patentNumber,
+      status: patent.status,
+      application_date: toDate(patent.applicationDate),
+      registration_date: toDate((patent as any).registrationDate ?? (patent as any).grantDate),
+      inventors: (patent as any).inventors ? JSON.stringify(ensureArray((patent as any).inventors)) : undefined,
+      description: patent.description,
+      category: patent.category,
+      priority: (patent as any).priority,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getPatent(id);
+      if (!existing) throw new Error("Patent not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}${column === "inventors" ? "::jsonb" : ""}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE patents SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Patent not found");
+    return rowPatent(result.rows[0]);
   }
 
   async deletePatent(id: string): Promise<boolean> {
-    const result = this.patents.delete(id);
-    this.saveData(); // 데이터 저장
-    return result;
+    await databaseReady;
+    const result = await pool.query("DELETE FROM patents WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Publication methods
-  async getPublication(id: string): Promise<Publication | undefined> {
-    return this.publications.get(id);
+  async getPublication(id: string): Promise<any> {
+    return queryOne("SELECT * FROM publications WHERE id = $1", [id], rowPublication);
   }
 
-  async getAllPublications(): Promise<Publication[]> {
-    return Array.from(this.publications.values());
+  async getAllPublications(): Promise<any[]> {
+    return queryMany("SELECT * FROM publications ORDER BY publication_date DESC NULLS LAST, created_at DESC", [], rowPublication);
   }
 
-  async getPublicationsByEmployee(employeeId: string): Promise<Publication[]> {
-    return Array.from(this.publications.values()).filter(p => p.employeeId === employeeId);
+  async getPublicationsByEmployee(employeeId: string): Promise<any[]> {
+    return queryMany("SELECT * FROM publications WHERE employee_id = $1 ORDER BY publication_date DESC NULLS LAST, created_at DESC", [employeeId], rowPublication);
   }
 
-  async createPublication(publication: InsertPublication): Promise<Publication> {
-    const id = randomUUID();
-    const newPublication: Publication = {
-      id,
-      ...publication,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.publications.set(id, newPublication);
-    this.saveData(); // 데이터 저장
-    return newPublication;
+  async createPublication(publication: InsertPublication | Record<string, any>): Promise<any> {
+    await databaseReady;
+    const id = publication.id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO publications (
+        id, employee_id, title, authors, journal, publication_date, doi,
+        impact_factor, category, level, description, conference, url, updated_at
+      ) VALUES (
+        $1,$2,$3,$4::jsonb,$5,$6,$7,
+        $8,$9,$10,$11,$12,$13,NOW()
+      ) RETURNING *`,
+      [
+        id,
+        publication.employeeId,
+        publication.title,
+        JSON.stringify(ensureArray((publication as any).authors)),
+        (publication as any).journal ?? null,
+        toDate((publication as any).publicationDate),
+        (publication as any).doi ?? null,
+        toNumber((publication as any).impactFactor),
+        (publication as any).category ?? (publication as any).publicationType ?? "journal",
+        (publication as any).level ?? (publication as any).status ?? null,
+        (publication as any).description ?? (publication as any).abstract ?? null,
+        (publication as any).conference ?? null,
+        (publication as any).url ?? null,
+      ],
+    );
+    return rowPublication(result.rows[0]);
   }
 
-  async updatePublication(id: string, publication: Partial<InsertPublication>): Promise<Publication> {
-    const existing = this.publications.get(id);
-    if (!existing) throw new Error('Publication not found');
-    
-    const updated: Publication = {
-      ...existing,
-      ...publication,
-      updatedAt: new Date()
-    };
-    this.publications.set(id, updated);
-    this.saveData(); // 데이터 저장
-    return updated;
+  async updatePublication(id: string, publication: Partial<InsertPublication> | Record<string, any>): Promise<any> {
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: publication.employeeId,
+      title: publication.title,
+      authors: (publication as any).authors ? JSON.stringify(ensureArray((publication as any).authors)) : undefined,
+      journal: (publication as any).journal,
+      publication_date: toDate((publication as any).publicationDate),
+      doi: (publication as any).doi,
+      impact_factor: toNumber((publication as any).impactFactor),
+      category: (publication as any).category ?? (publication as any).publicationType,
+      level: (publication as any).level ?? (publication as any).status,
+      description: (publication as any).description ?? (publication as any).abstract,
+      conference: (publication as any).conference,
+      url: (publication as any).url,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getPublication(id);
+      if (!existing) throw new Error("Publication not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}${column === "authors" ? "::jsonb" : ""}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE publications SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Publication not found");
+    return rowPublication(result.rows[0]);
   }
 
   async deletePublication(id: string): Promise<boolean> {
-    const result = this.publications.delete(id);
-    this.saveData(); // 데이터 저장
-    return result;
+    await databaseReady;
+    const result = await pool.query("DELETE FROM publications WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Award methods
-  async getAward(id: string): Promise<Award | undefined> {
-    return this.awards.get(id);
+  async getAward(id: string): Promise<any> {
+    return queryOne("SELECT * FROM awards WHERE id = $1", [id], rowAward);
   }
 
-  async getAllAwards(): Promise<Award[]> {
-    return Array.from(this.awards.values());
+  async getAllAwards(): Promise<any[]> {
+    return queryMany("SELECT * FROM awards ORDER BY award_date DESC NULLS LAST, created_at DESC", [], rowAward);
   }
 
-  async getAwardsByEmployee(employeeId: string): Promise<Award[]> {
-    return Array.from(this.awards.values()).filter(a => a.employeeId === employeeId);
+  async getAwardsByEmployee(employeeId: string): Promise<any[]> {
+    return queryMany("SELECT * FROM awards WHERE employee_id = $1 ORDER BY award_date DESC NULLS LAST, created_at DESC", [employeeId], rowAward);
   }
 
-  async createAward(award: InsertAward): Promise<Award> {
-    const id = randomUUID();
-    const newAward: Award = {
-      id,
-      ...award,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.awards.set(id, newAward);
-    this.saveData(); // 데이터 저장
-    return newAward;
+  async createAward(award: InsertAward | Record<string, any>): Promise<any> {
+    await databaseReady;
+    const id = award.id ?? uniqueId();
+    const teamMembers = ensureArray((award as any).teamMembers);
+    const result = await pool.query(
+      `INSERT INTO awards (
+        id, employee_id, title, awarding_organization, category, level, award_date,
+        description, certificate_url, monetary_value, is_team_award, team_members, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,
+        $8,$9,$10,$11,$12::jsonb,NOW()
+      ) RETURNING *`,
+      [
+        id,
+        award.employeeId,
+        (award as any).title ?? (award as any).awardName,
+        (award as any).awardingOrganization ?? null,
+        award.category ?? null,
+        award.level ?? "company",
+        toDate((award as any).awardDate),
+        award.description ?? null,
+        award.certificateUrl ?? null,
+        toNumber((award as any).monetaryValue),
+        teamMembers.length > 0 || (award as any).isTeamAward === true,
+        JSON.stringify(teamMembers),
+      ],
+    );
+    return rowAward(result.rows[0]);
   }
 
-  async updateAward(id: string, award: Partial<InsertAward>): Promise<Award> {
-    const existing = this.awards.get(id);
-    if (!existing) throw new Error('Award not found');
-    
-    const updated: Award = {
-      ...existing,
-      ...award,
-      updatedAt: new Date()
-    };
-    this.awards.set(id, updated);
-    this.saveData(); // 데이터 저장
-    return updated;
+  async updateAward(id: string, award: Partial<InsertAward> | Record<string, any>): Promise<any> {
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: award.employeeId,
+      title: (award as any).title ?? (award as any).awardName,
+      awarding_organization: (award as any).awardingOrganization,
+      category: award.category,
+      level: award.level,
+      award_date: toDate((award as any).awardDate),
+      description: award.description,
+      certificate_url: award.certificateUrl,
+      monetary_value: toNumber((award as any).monetaryValue),
+      is_team_award: (award as any).isTeamAward,
+      team_members: (award as any).teamMembers ? JSON.stringify(ensureArray((award as any).teamMembers)) : undefined,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getAward(id);
+      if (!existing) throw new Error("Award not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}${column === "team_members" ? "::jsonb" : ""}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE awards SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Award not found");
+    return rowAward(result.rows[0]);
   }
 
   async deleteAward(id: string): Promise<boolean> {
-    const result = this.awards.delete(id);
-    this.saveData(); // 데이터 저장
-    return result;
+    await databaseReady;
+    const result = await pool.query("DELETE FROM awards WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Project methods
-  async getProject(id: string): Promise<Project | undefined> {
-    return this.projects.get(id);
+  async getProject(id: string): Promise<any> {
+    return queryOne("SELECT * FROM projects WHERE id = $1", [id], rowProject);
   }
 
-  async getAllProjects(): Promise<Project[]> {
-    return Array.from(this.projects.values());
+  async getAllProjects(): Promise<any[]> {
+    return queryMany("SELECT * FROM projects ORDER BY start_date DESC NULLS LAST, created_at DESC", [], rowProject);
   }
 
-  async getProjectsByEmployee(employeeId: string): Promise<Project[]> {
-    return Array.from(this.projects.values()).filter(p => p.employeeId === employeeId);
+  async getProjectsByEmployee(employeeId: string): Promise<any[]> {
+    return queryMany("SELECT * FROM projects WHERE employee_id = $1 ORDER BY start_date DESC NULLS LAST, created_at DESC", [employeeId], rowProject);
   }
 
-  async createProject(project: InsertProject): Promise<Project> {
-      const id = randomUUID();
-    const newProject: Project = {
-      id,
-      ...project,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.projects.set(id, newProject);
-    this.saveData(); // 데이터 저장
-    return newProject;
+  async createProject(project: InsertProject | Record<string, any>): Promise<any> {
+    await databaseReady;
+    const id = project.id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO projects (
+        id, employee_id, project_name, role, start_date, end_date, status,
+        description, technologies, team_size, budget, client, is_internal, notes, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,
+        $8,$9,$10,$11,$12,$13,$14,NOW()
+      ) RETURNING *`,
+      [
+        id,
+        project.employeeId,
+        project.projectName,
+        project.role,
+        toDate(project.startDate),
+        toDate(project.endDate),
+        project.status ?? "planned",
+        project.description ?? null,
+        project.technologies ?? null,
+        toInteger(project.teamSize),
+        toNumber(project.budget),
+        project.client ?? null,
+        project.isInternal ?? false,
+        (project as any).notes ?? null,
+      ],
+    );
+    return rowProject(result.rows[0]);
   }
 
-  async updateProject(id: string, project: Partial<InsertProject>): Promise<Project> {
-    const existing = this.projects.get(id);
-    if (!existing) throw new Error('Project not found');
-    
-    const updated: Project = {
-      ...existing,
-      ...project,
-      updatedAt: new Date()
-    };
-    this.projects.set(id, updated);
-    this.saveData(); // 데이터 저장
-    return updated;
+  async updateProject(id: string, project: Partial<InsertProject> | Record<string, any>): Promise<any> {
+    await databaseReady;
+    const payload = stripUndefined({
+      employee_id: project.employeeId,
+      project_name: project.projectName,
+      role: project.role,
+      start_date: toDate(project.startDate),
+      end_date: toDate(project.endDate),
+      status: project.status,
+      description: project.description,
+      technologies: project.technologies,
+      team_size: toInteger(project.teamSize),
+      budget: toNumber(project.budget),
+      client: project.client,
+      is_internal: project.isInternal,
+      notes: (project as any).notes,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getProject(id);
+      if (!existing) throw new Error("Project not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE projects SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Project not found");
+    return rowProject(result.rows[0]);
   }
 
   async deleteProject(id: string): Promise<boolean> {
-    const result = this.projects.delete(id);
-    this.saveData(); // 데이터 저장
-    return result;
+    await databaseReady;
+    const result = await pool.query("DELETE FROM projects WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // Full profile method
-  async getEmployeeFullProfile(employeeId: string): Promise<{
-    employee: Employee;
-    trainingHistory: TrainingHistory[];
-    certifications: Certification[];
-    languages: Language[];
-    skills: Skill[];
-    skillCalculations: SkillCalculation[];
-    patents: Patent[];
-    publications: Publication[];
-    awards: Award[];
-    projects: Project[];
-  }> {
-    const employee = await this.getEmployee(employeeId);
-    if (!employee) {
-      throw new Error('Employee not found');
-    }
+  async getTrainingHours(id: string): Promise<TrainingHours | undefined> {
+    return queryOne("SELECT * FROM training_hours WHERE id = $1", [id], rowTrainingHours);
+  }
 
-    const [
-      trainingHistory,
-      certifications,
-      languages,
-      skills,
-      skillCalculations,
-      patents,
-      publications,
-      awards,
-      projects
-    ] = await Promise.all([
+  async getAllTrainingHours(): Promise<TrainingHours[]> {
+    return queryMany("SELECT * FROM training_hours ORDER BY year DESC, team ASC", [], rowTrainingHours);
+  }
+
+  async getTrainingHoursByYearRange(startYear: number, endYear: number): Promise<TrainingHours[]> {
+    return queryMany("SELECT * FROM training_hours WHERE year BETWEEN $1 AND $2 ORDER BY year DESC, team ASC", [startYear, endYear], rowTrainingHours);
+  }
+
+  async createTrainingHours(trainingHours: InsertTrainingHours): Promise<TrainingHours> {
+    await databaseReady;
+    const id = (trainingHours as any).id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO training_hours (id, year, team, training_type, hours, description, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW()) RETURNING *`,
+      [id, trainingHours.year, trainingHours.team, trainingHours.trainingType, trainingHours.hours, trainingHours.description ?? null],
+    );
+    return rowTrainingHours(result.rows[0]);
+  }
+
+  async updateTrainingHours(id: string, trainingHours: Partial<InsertTrainingHours>): Promise<TrainingHours> {
+    await databaseReady;
+    const payload = stripUndefined({
+      year: toInteger(trainingHours.year),
+      team: trainingHours.team,
+      training_type: trainingHours.trainingType,
+      hours: toNumber(trainingHours.hours),
+      description: trainingHours.description,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getTrainingHours(id);
+      if (!existing) throw new Error("Training hours not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE training_hours SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Training hours not found");
+    return rowTrainingHours(result.rows[0]);
+  }
+
+  async deleteTrainingHours(id: string): Promise<boolean> {
+    await databaseReady;
+    const result = await pool.query("DELETE FROM training_hours WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getTeamEmployees(id: string): Promise<TeamEmployees | undefined> {
+    return queryOne("SELECT * FROM team_employees WHERE id = $1", [id], rowTeamEmployees);
+  }
+
+  async getAllTeamEmployees(): Promise<TeamEmployees[]> {
+    return queryMany("SELECT * FROM team_employees ORDER BY year DESC, team ASC", [], rowTeamEmployees);
+  }
+
+  async getTeamEmployeesByYearRange(startYear: number, endYear: number): Promise<TeamEmployees[]> {
+    return queryMany("SELECT * FROM team_employees WHERE year BETWEEN $1 AND $2 ORDER BY year DESC, team ASC", [startYear, endYear], rowTeamEmployees);
+  }
+
+  async createTeamEmployees(teamEmployees: InsertTeamEmployees): Promise<TeamEmployees> {
+    await databaseReady;
+    const id = (teamEmployees as any).id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO team_employees (id, year, team, employee_count, description, updated_at)
+       VALUES ($1,$2,$3,$4,$5,NOW()) RETURNING *`,
+      [id, teamEmployees.year, teamEmployees.team, teamEmployees.employeeCount, teamEmployees.description ?? null],
+    );
+    return rowTeamEmployees(result.rows[0]);
+  }
+
+  async updateTeamEmployees(id: string, teamEmployees: Partial<InsertTeamEmployees>): Promise<TeamEmployees> {
+    await databaseReady;
+    const payload = stripUndefined({
+      year: toInteger(teamEmployees.year),
+      team: teamEmployees.team,
+      employee_count: toInteger(teamEmployees.employeeCount),
+      description: teamEmployees.description,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = await this.getTeamEmployees(id);
+      if (!existing) throw new Error("Team employees not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE team_employees SET ${setClause} WHERE id = $1 RETURNING *`, [id, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Team employees not found");
+    return rowTeamEmployees(result.rows[0]);
+  }
+
+  async deleteTeamEmployees(id: string): Promise<boolean> {
+    await databaseReady;
+    const result = await pool.query("DELETE FROM team_employees WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getEmployeeFullProfile(employeeId: string): Promise<any> {
+    const employee = await this.getEmployee(employeeId);
+    if (!employee) throw new Error("Employee not found");
+    const [trainingHistory, certifications, languages, skills, skillCalculations, patents, publications, awards, projects] = await Promise.all([
       this.getTrainingHistoryByEmployee(employeeId),
       this.getCertificationsByEmployee(employeeId),
       this.getLanguagesByEmployee(employeeId),
@@ -1155,147 +1491,183 @@ export class MemStorage implements IStorage {
       this.getPatentsByEmployee(employeeId),
       this.getPublicationsByEmployee(employeeId),
       this.getAwardsByEmployee(employeeId),
-      this.getProjectsByEmployee(employeeId)
+      this.getProjectsByEmployee(employeeId),
     ]);
-
-    return {
-      employee,
-      trainingHistory,
-      certifications,
-      languages,
-      skills,
-      skillCalculations,
-      patents,
-      publications,
-      awards,
-      projects
-    };
+    return { employee, trainingHistory, certifications, languages, skills, skillCalculations, patents, publications, awards, projects };
   }
 
-  // 보기 상태 저장
-  saveViewState(viewState: any): void {
-    try {
-      this.viewState = viewState;
-      this.saveData();
-    } catch (error) {
-      console.error('❌ 보기 상태 저장 중 오류:', error);
-      throw error;
+  async getDepartments(): Promise<DepartmentRecord[]> {
+    return queryMany("SELECT * FROM departments ORDER BY department_code", [], rowDepartment);
+  }
+
+  async createDepartment(department: DepartmentRecord): Promise<DepartmentRecord> {
+    await databaseReady;
+    const id = department.id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO departments (
+        id, department_code, department_name, description, manager_id, budget, location, is_active, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,NOW()
+      ) RETURNING *`,
+      [id, department.code, department.name, department.description ?? null, department.managerId ?? null, toNumber(department.budget), department.location ?? null, department.isActive ?? true],
+    );
+    return rowDepartment(result.rows[0]);
+  }
+
+  async updateDepartment(code: string, department: Partial<DepartmentRecord>): Promise<DepartmentRecord> {
+    await databaseReady;
+    const payload = stripUndefined({
+      department_name: department.name,
+      description: department.description,
+      manager_id: department.managerId,
+      budget: toNumber(department.budget),
+      location: department.location,
+      is_active: department.isActive,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = (await this.getDepartments()).find((item) => item.code === code);
+      if (!existing) throw new Error("Department not found");
+      return existing;
     }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(`UPDATE departments SET ${setClause} WHERE department_code = $1 RETURNING *`, [code, ...entries.map(([, value]) => value)]);
+    if (!result.rows[0]) throw new Error("Department not found");
+    return rowDepartment(result.rows[0]);
   }
 
-  // 보기 상태 불러오기
-  getViewState(): any {
-    try {
-      return this.viewState || null;
-    } catch (error) {
-      console.error('❌ 보기 상태 불러오기 중 오류:', error);
-      return null;
-    }
+  async deleteDepartment(code: string): Promise<boolean> {
+    await databaseReady;
+    await pool.query(`DELETE FROM teams WHERE department_id IN (SELECT id FROM departments WHERE department_code = $1)`, [code]);
+    const result = await pool.query("DELETE FROM departments WHERE department_code = $1", [code]);
+    return (result.rowCount ?? 0) > 0;
   }
 
-  // ===== 교육 시간 데이터 메서드들 =====
-  
-  async getTrainingHours(id: string): Promise<TrainingHours | undefined> {
-    return this.trainingHours.get(id);
-  }
-
-  async getAllTrainingHours(): Promise<TrainingHours[]> {
-    return Array.from(this.trainingHours.values());
-  }
-
-  async getTrainingHoursByYearRange(startYear: number, endYear: number): Promise<TrainingHours[]> {
-    return Array.from(this.trainingHours.values()).filter(
-      th => th.year >= startYear && th.year <= endYear
+  async getTeams(departmentCode?: string): Promise<TeamRecord[]> {
+    const values: any[] = [];
+    const where = departmentCode ? "WHERE d.department_code = $1" : "";
+    if (departmentCode) values.push(departmentCode);
+    return queryMany(
+      `SELECT t.*, d.department_code
+       FROM teams t
+       JOIN departments d ON d.id = t.department_id
+       ${where}
+       ORDER BY t.team_code`,
+      values,
+      rowTeam,
     );
   }
 
-  async createTrainingHours(trainingHours: InsertTrainingHours): Promise<TrainingHours> {
-    const id = randomUUID();
-    const newTrainingHours: TrainingHours = {
-      id,
-      ...trainingHours,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.trainingHours.set(id, newTrainingHours);
-    this.saveData();
-    return newTrainingHours;
-  }
-
-  async updateTrainingHours(id: string, trainingHours: Partial<InsertTrainingHours>): Promise<TrainingHours> {
-    const existing = this.trainingHours.get(id);
-    if (!existing) {
-      throw new Error('Training hours not found');
-    }
-    const updated: TrainingHours = {
-      ...existing,
-      ...trainingHours,
-      updatedAt: new Date()
-    };
-    this.trainingHours.set(id, updated);
-    this.saveData();
-    return updated;
-  }
-
-  async deleteTrainingHours(id: string): Promise<boolean> {
-    const deleted = this.trainingHours.delete(id);
-    if (deleted) {
-      this.saveData();
-    }
-    return deleted;
-  }
-
-  // ===== 팀 인원 데이터 메서드들 =====
-  
-  async getTeamEmployees(id: string): Promise<TeamEmployees | undefined> {
-    return this.teamEmployees.get(id);
-  }
-
-  async getAllTeamEmployees(): Promise<TeamEmployees[]> {
-    return Array.from(this.teamEmployees.values());
-  }
-
-  async getTeamEmployeesByYearRange(startYear: number, endYear: number): Promise<TeamEmployees[]> {
-    return Array.from(this.teamEmployees.values()).filter(
-      te => te.year >= startYear && te.year <= endYear
+  async createTeam(team: TeamRecord): Promise<TeamRecord> {
+    await databaseReady;
+    const department = await queryOne("SELECT * FROM departments WHERE department_code = $1", [team.departmentCode], rowDepartment);
+    if (!department?.id) throw new Error("Department not found");
+    const id = team.id ?? uniqueId();
+    const result = await pool.query(
+      `INSERT INTO teams (
+        id, team_code, team_name, department_id, description, team_lead_id, budget, location, is_active, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()
+      )
+      RETURNING *, (SELECT department_code FROM departments WHERE id = $4) AS department_code`,
+      [id, team.code, team.name, department.id, team.description ?? null, team.teamLeadId ?? null, toNumber(team.budget), team.location ?? null, team.isActive ?? true],
     );
+    return rowTeam(result.rows[0]);
   }
 
-  async createTeamEmployees(teamEmployees: InsertTeamEmployees): Promise<TeamEmployees> {
-    const id = randomUUID();
-    const newTeamEmployees: TeamEmployees = {
-      id,
-      ...teamEmployees,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    this.teamEmployees.set(id, newTeamEmployees);
-    this.saveData();
-    return newTeamEmployees;
-  }
-
-  async updateTeamEmployees(id: string, teamEmployees: Partial<InsertTeamEmployees>): Promise<TeamEmployees> {
-    const existing = this.teamEmployees.get(id);
-    if (!existing) {
-      throw new Error('Team employees not found');
+  async updateTeam(code: string, team: Partial<TeamRecord>): Promise<TeamRecord> {
+    await databaseReady;
+    let departmentId: string | undefined;
+    if (team.departmentCode) {
+      const department = await queryOne("SELECT * FROM departments WHERE department_code = $1", [team.departmentCode], rowDepartment);
+      if (!department?.id) throw new Error("Department not found");
+      departmentId = department.id;
     }
-    const updated: TeamEmployees = {
-      ...existing,
-      ...teamEmployees,
-      updatedAt: new Date()
-    };
-    this.teamEmployees.set(id, updated);
-    this.saveData();
-    return updated;
+    const payload = stripUndefined({
+      team_name: team.name,
+      department_id: departmentId,
+      description: team.description,
+      team_lead_id: team.teamLeadId,
+      budget: toNumber(team.budget),
+      location: team.location,
+      is_active: team.isActive,
+    });
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      const existing = (await this.getTeams()).find((item) => item.code === code);
+      if (!existing) throw new Error("Team not found");
+      return existing;
+    }
+    const setClause = entries.map(([column], index) => `${column} = $${index + 2}`).concat("updated_at = NOW()").join(", ");
+    const result = await pool.query(
+      `UPDATE teams t
+       SET ${setClause}
+       FROM departments d
+       WHERE t.team_code = $1 AND d.id = t.department_id
+       RETURNING t.*, d.department_code`,
+      [code, ...entries.map(([, value]) => value)],
+    );
+    if (!result.rows[0]) throw new Error("Team not found");
+    return rowTeam(result.rows[0]);
   }
 
-  async deleteTeamEmployees(id: string): Promise<boolean> {
-    const deleted = this.teamEmployees.delete(id);
-    if (deleted) {
-      this.saveData();
+  async deleteTeam(code: string): Promise<boolean> {
+    await databaseReady;
+    const result = await pool.query("DELETE FROM teams WHERE team_code = $1", [code]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getProposals(filters: ProposalFilters = {}): Promise<ProposalRecord[]> {
+    const clauses: string[] = [];
+    const values: any[] = [];
+    if (filters.employeeId) {
+      values.push(filters.employeeId);
+      clauses.push(`employee_id = $${values.length}`);
     }
-    return deleted;
+    if (filters.startDate) {
+      values.push(toDate(filters.startDate));
+      clauses.push(`submission_date >= $${values.length}`);
+    }
+    if (filters.endDate) {
+      values.push(toDate(filters.endDate));
+      clauses.push(`submission_date <= $${values.length}`);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    return queryMany(`SELECT * FROM proposals ${where} ORDER BY submission_date DESC NULLS LAST, created_at DESC`, values, rowProposal);
+  }
+
+  async createProposal(proposal: ProposalRecord): Promise<ProposalRecord> {
+    await databaseReady;
+    const id = proposal.id || `proposal_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    const now = new Date();
+    const payload = { ...proposal, id, createdAt: proposal.createdAt ?? now.toISOString(), updatedAt: proposal.updatedAt ?? now.toISOString() };
+    const result = await pool.query(
+      `INSERT INTO proposals (id, employee_id, submission_date, payload, created_at, updated_at)
+       VALUES ($1,$2,$3,$4::jsonb,$5,$6)
+       ON CONFLICT (id) DO UPDATE SET
+         employee_id = EXCLUDED.employee_id,
+         submission_date = EXCLUDED.submission_date,
+         payload = EXCLUDED.payload,
+         updated_at = EXCLUDED.updated_at
+       RETURNING *`,
+      [id, proposal.employeeId, toDate(proposal.submissionDate), JSON.stringify(payload), toDate(payload.createdAt), toDate(payload.updatedAt)],
+    );
+    return rowProposal(result.rows[0]);
+  }
+
+  async deleteProposalsByEmployee(employeeId: string): Promise<number> {
+    await databaseReady;
+    const result = await pool.query("DELETE FROM proposals WHERE employee_id = $1", [employeeId]);
+    return result.rowCount ?? 0;
+  }
+
+  async getAppSetting<T = any>(key: string): Promise<T | null> {
+    return getSetting<T>(key);
+  }
+
+  async setAppSetting(key: string, value: JsonValue): Promise<void> {
+    await upsertSetting(key, value);
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new PostgresStorage();

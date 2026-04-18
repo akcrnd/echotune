@@ -19,21 +19,15 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=5000
-ENV DATA_FILE_PATH=/data/data.json
 
 # Copy necessary files from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/data.json ./data.seed.json
-COPY docker-entrypoint.sh ./docker-entrypoint.sh
-
-RUN chmod +x ./docker-entrypoint.sh && mkdir -p /data
+COPY --from=builder /app/data.json ./legacy-data.json
 
 # Expose the port the app runs on
 EXPOSE 5000
-
-ENTRYPOINT ["./docker-entrypoint.sh"]
 
 # Start the application
 CMD ["npm", "start"]

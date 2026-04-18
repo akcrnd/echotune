@@ -1,4 +1,4 @@
-import type { Express } from "express";
+﻿import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import multer from "multer";
@@ -17,8 +17,12 @@ import { setupRdEvaluationRoutes } from "./rd-evaluation-routes";
 import { setupAchievementsRoutes } from "./achievements-routes";
 import { calculateCertificationScore } from "./rd-evaluation-auto";
 
-// Helper function to load detailedCriteria from data.json
-function loadDetailedCriteria(): any {
+async function loadDetailedCriteria(): Promise<any> {
+  const stored = await storage.getAppSetting("detailedCriteria");
+  if (stored) {
+    return stored;
+  }
+
   const dataPath = path.join(process.cwd(), 'data.json');
   if (fs.existsSync(dataPath)) {
     const fileContent = fs.readFileSync(dataPath, 'utf8');
@@ -506,7 +510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const certificationData = insertCertificationSchema.parse(req.body);
 
       // 자격증 점수 자동 계산 및 저장
-      const detailedCriteria = loadDetailedCriteria();
+      const detailedCriteria = await loadDetailedCriteria();
       const calculatedScore = calculateCertificationScore(certificationData, detailedCriteria);
 
       // scoreAtAcquisition, scoringCriteriaVersion, useFixedScore 설정
@@ -546,7 +550,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...certificationData
         };
 
-        const detailedCriteria = loadDetailedCriteria();
+      const detailedCriteria = await loadDetailedCriteria();
         const calculatedScore = calculateCertificationScore(mergedData, detailedCriteria);
 
         console.log('🔍 계산된 점수:', calculatedScore);
@@ -1363,6 +1367,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // 기준 저장
       fs.writeFileSync(criteriaPath, JSON.stringify(criteria, null, 2));
+      await storage.setAppSetting("rdEvaluationCriteria", criteria);
 
       // 2. 직원 정보 입력 폼 업데이트가 요청된 경우
       if (updateEmployeeForms) {
@@ -3116,6 +3121,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (detailedCriteria) {
         data.detailedCriteria = detailedCriteria;
       }
+      await storage.setAppSetting("rdEvaluationCriteria", criteria);
+      if (detailedCriteria) {
+        await storage.setAppSetting("detailedCriteria", detailedCriteria);
+      }
 
       // 기준 저장
       try {
@@ -3268,3 +3277,4 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
+

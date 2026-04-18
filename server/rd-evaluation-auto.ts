@@ -1,6 +1,4 @@
 import { storage } from "./storage";
-import fs from "fs";
-import path from "path";
 
 // 자격증 점수 자동 계산 함수 (detailedCriteria 기반)
 export function calculateCertificationScore(cert: any, detailedCriteria: any): number {
@@ -64,33 +62,10 @@ function convertScore(
 // 직원의 6대 역량 자동 평가 실행
 export async function calculateAutoRdEvaluation(employeeId: string, evaluationYear: number = new Date().getFullYear(), startDate?: string, endDate?: string) {
   try {
-    // 직원 기본 정보 조회 (data.json에서)
-    const dataPath = path.join(process.cwd(), 'data.json');
-    let employee = null;
-    let rdEvaluationCriteria = null;
-    let detailedCriteria = null;  // 함수 스코프로 이동
-    
-    if (fs.existsSync(dataPath)) {
-      const fileContent = fs.readFileSync(dataPath, 'utf8');
-      const data = JSON.parse(fileContent);
-      
-      if (data.employees && data.employees[employeeId]) {
-        employee = data.employees[employeeId];
-      }
-      
-      // R&D 역량평가 기준 로드
-      if (data.rdEvaluationCriteria) {
-        rdEvaluationCriteria = data.rdEvaluationCriteria;
-      } else {
-        console.error('❌ rdEvaluationCriteria 없음!');
-      }
-      
-      // detailedCriteria 로드
-      if (data.detailedCriteria) {
-        detailedCriteria = data.detailedCriteria;
-      }
-    }
-    
+    const employee = await storage.getEmployee(employeeId);
+    const rdEvaluationCriteria = await storage.getAppSetting("rdEvaluationCriteria");
+    const detailedCriteria = await storage.getAppSetting("detailedCriteria");
+
     if (!employee) {
       throw new Error("직원을 찾을 수 없습니다.");
     }
@@ -521,7 +496,6 @@ function filterByDateRange(items: any[], dateField: string, startDate?: string, 
 
 // 관련 데이터 조회 (data.json에서)
 async function getRelatedData(employeeId: string, startDate?: string, endDate?: string) {
-  const dataPath = path.join(process.cwd(), 'data.json');
   const results: any = {
     certifications: [],
     languages: [],
@@ -532,84 +506,25 @@ async function getRelatedData(employeeId: string, startDate?: string, endDate?: 
     trainingHistory: [],
     proposals: []
   };
-  
+
   try {
-    if (fs.existsSync(dataPath)) {
-      const fileContent = fs.readFileSync(dataPath, 'utf8');
-      const data = JSON.parse(fileContent);
-      
-      // 각 데이터 타입별로 필터링
-      if (data.certifications) {
-        // 자격증은 기간 필터 영향 없이 영구 반영 (누적 영구 반영)
-        results.certifications = Object.values(data.certifications).filter((item: any) => 
-          item.employeeId === employeeId && item.isActive
-        );
-      }
-      
-      if (data.languages) {
-        // 어학능력은 날짜 필터링 없이 전체 포함 (언어 능력은 지속적)
-        results.languages = Object.values(data.languages).filter((item: any) => 
-          item.employeeId === employeeId && item.isActive
-        );
-      }
-      
-      if (data.trainingHistory) {
-        let trainingHistory = Object.values(data.trainingHistory).filter((item: any) => 
-          item.employeeId === employeeId && item.status === 'completed'
-        );
-        // 교육은 완료일 기준으로 필터링
-        results.trainingHistory = filterByDateRange(trainingHistory, 'completionDate', startDate, endDate);
-      }
-      
-      if (data.projects) {
-        let projects = Object.values(data.projects).filter((item: any) => 
-          item.employeeId === employeeId
-        );
-        // 프로젝트는 시작일 기준으로 필터링
-        results.projects = filterByDateRange(projects, 'startDate', startDate, endDate);
-      }
-      
-      if (data.patents) {
-        let patents = Object.values(data.patents).filter((item: any) => 
-          item.employeeId === employeeId
-        );
-        // 특허는 출원일 기준으로 필터링
-        results.patents = filterByDateRange(patents, 'applicationDate', startDate, endDate);
-      }
-      
-      if (data.publications) {
-        let publications = Object.values(data.publications).filter((item: any) => 
-          item.employeeId === employeeId
-        );
-        // 논문은 발행일 기준으로 필터링
-        results.publications = filterByDateRange(publications, 'publicationDate', startDate, endDate);
-      }
-      
-      if (data.awards) {
-        let awards = Object.values(data.awards).filter((item: any) => 
-          item.employeeId === employeeId
-        );
-        // 수상은 수상일 기준으로 필터링
-        results.awards = filterByDateRange(awards, 'awardDate', startDate, endDate);
-      }
-      
-      // 제안제도 데이터 (data.json에서 로드)
-      if (data.proposals) {
-        let proposals = [];
-        if (Array.isArray(data.proposals)) {
-          proposals = data.proposals;
-        } else {
-          proposals = Object.values(data.proposals); // Convert object to array
-        }
-        let filteredProposals = proposals.filter((p: any) => p.employeeId === employeeId);
-        // 제안제도는 제출일 기준으로 필터링
-        results.proposals = filterByDateRange(filteredProposals, 'submissionDate', startDate, endDate);
-      }
-    }
+    results.certifications = (await storage.getCertificationsByEmployee(employeeId)).filter((item: any) => item.isActive !== false);
+    results.languages = (await storage.getLanguagesByEmployee(employeeId)).filter((item: any) => item.isActive !== false);
+    results.trainingHistory = filterByDateRange(
+      (await storage.getTrainingHistoryByEmployee(employeeId)).filter((item: any) => item.status === 'completed'),
+      'completionDate',
+      startDate,
+      endDate
+    );
+    results.projects = filterByDateRange(await storage.getProjectsByEmployee(employeeId), 'startDate', startDate, endDate);
+    results.patents = filterByDateRange(await storage.getPatentsByEmployee(employeeId), 'applicationDate', startDate, endDate);
+    results.publications = filterByDateRange(await storage.getPublicationsByEmployee(employeeId), 'publicationDate', startDate, endDate);
+    results.awards = filterByDateRange(await storage.getAwardsByEmployee(employeeId), 'awardDate', startDate, endDate);
+    results.proposals = filterByDateRange(await storage.getProposals({ employeeId, startDate, endDate }), 'submissionDate', startDate, endDate);
   } catch (error) {
-    console.error("관련 데이터 조회 오류:", error);
+    console.error("?? ??? ?? ??:", error);
   }
-  
+
   return results;
 }
 

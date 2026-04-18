@@ -5,4 +5,5 @@ dist
 .local
 test-results
 attached_assets
+backups
 *.log

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, integer, real, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { employees } from "./schema";
 
 // 연구원 역량평가 6대 항목 테이블
 export const rdEvaluations = pgTable("rd_evaluations", {

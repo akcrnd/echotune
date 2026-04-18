@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
-import { writeFileSync, readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
+import { dirname, join } from "path";
 import type { 
   Employee, 
   InsertEmployee, 
@@ -175,7 +175,7 @@ export class MemStorage implements IStorage {
     this.trainingHours = new Map();
     this.teamEmployees = new Map();
     this.viewState = null;
-    this.dataFile = join(process.cwd(), 'data.json');
+    this.dataFile = process.env.DATA_FILE_PATH || join(process.cwd(), "data.json");
     
     // Load data from file or initialize with sample data
     this.loadData();
@@ -183,6 +183,8 @@ export class MemStorage implements IStorage {
 
   private loadData() {
     try {
+      mkdirSync(dirname(this.dataFile), { recursive: true });
+
       
       if (existsSync(this.dataFile)) {
         const data = JSON.parse(readFileSync(this.dataFile, 'utf8'));
@@ -290,6 +292,7 @@ export class MemStorage implements IStorage {
   private saveData() {
     try {
       // 1. 기존 파일 전체 로드
+      mkdirSync(dirname(this.dataFile), { recursive: true });
       let existingData = {};
       if (existsSync(this.dataFile)) {
         const fileContent = readFileSync(this.dataFile, 'utf8');

@@ -52,6 +52,7 @@ Runtime services:
 - Deployment verification note: GitHub App trigger is expected for new commits on `main`.
 - Verification marker: post-GitHub-App save test commit.
 - Verification marker: post-provider-save push test.
+- Verification marker: app-gh clean service trigger test.
 
 ## Backup and recovery
 

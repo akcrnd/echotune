@@ -50,6 +50,7 @@ Runtime services:
 - Postgres data persists in the Docker volume `echotune_postgres`.
 - GitHub App based Dokploy auto deploy is configured for the `main` branch.
 - Deployment verification note: GitHub App trigger is expected for new commits on `main`.
+- Verification marker: post-GitHub-App save test commit.
 
 ## Backup and recovery
 

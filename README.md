@@ -51,6 +51,7 @@ Runtime services:
 - GitHub App based Dokploy auto deploy is configured for the `main` branch.
 - Deployment verification note: GitHub App trigger is expected for new commits on `main`.
 - Verification marker: post-GitHub-App save test commit.
+- Verification marker: post-provider-save push test.
 
 ## Backup and recovery
 

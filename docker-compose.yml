@@ -10,4 +10,4 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
-      DATABASE_URL: postgresql://postgres:EchotunePg2026@echotune-postgres-aedxly:5432/echotune
+      DATABASE_URL: postgresql://postgres:EchotunePg2026@192.168.3.17:22024/echotune

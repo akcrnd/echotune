@@ -53,6 +53,7 @@ Runtime services:
 - Verification marker: post-GitHub-App save test commit.
 - Verification marker: post-provider-save push test.
 - Verification marker: app-gh clean service trigger test.
+- Verification marker: final app-gh push trigger test.
 
 ## Backup and recovery
 

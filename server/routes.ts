@@ -1206,6 +1206,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // R&D Evaluation Criteria Management routes
   app.get('/api/rd-evaluation-criteria', async (req, res) => {
     try {
+      const storedCriteria = (await storage.getAppSetting("rdEvaluationCriteria")) || {};
+      const storedDetailedCriteria = (await storage.getAppSetting("detailedCriteria")) || {};
+      if (Object.keys(storedCriteria).length > 0 || Object.keys(storedDetailedCriteria).length > 0) {
+        const criteria = Object.keys(storedDetailedCriteria).length > 0
+          ? storedDetailedCriteria
+          : {
+              global_competency: {
+                english: {
+                  toeic: { "950-990": 10, "900-949": 8, "800-899": 6, "700-799": 4, "700미만": 2 },
+                  toefl: { "113-120": 10, "105-112": 8, "90-104": 6, "70-89": 4, "70미만": 2 },
+                  ielts: { "8.5-9.0": 10, "7.5-8.4": 8, "6.5-7.4": 6, "5.5-6.4": 4, "5.5미만": 2 },
+                  teps: { "526-600": 10, "453-525": 8, "387-452": 6, "327-386": 4, "327미만": 2 }
+                },
+                japanese: {
+                  jlpt: { "N1": 10, "N2": 7, "N3": 4, "N4": 2, "N5": 1 },
+                  jpt: { "900-990": 8, "800-899": 6, "700-799": 4, "700미만": 2 }
+                },
+                chinese: {
+                  hsk: { "6급": 10, "5급": 8, "4급": 6, "3급": 4, "2급": 2, "1급": 1 },
+                  tocfl: { "Band C Level 6": 10, "Band C Level 5": 8, "Band B Level 4": 6, "Band B Level 3": 4, "Band A Level 2": 2, "Band A Level 1": 1 }
+                }
+              }
+            };
+        const globalCompetency = criteria.global_competency || {};
+        const languageTests: any = {};
+        if (globalCompetency.english?.toeic) {
+          languageTests.English = languageTests.English || { tests: [] };
+          languageTests.English.tests.push({ value: 'TOEIC', label: 'TOEIC', hasScore: true, scoreRange: '10-990점', criteria: globalCompetency.english.toeic });
+        }
+        if (globalCompetency.english?.toefl) {
+          languageTests.English = languageTests.English || { tests: [] };
+          languageTests.English.tests.push({ value: 'TOEFL', label: 'TOEFL iBT', hasScore: true, scoreRange: '0-120점', criteria: globalCompetency.english.toefl });
+        }
+        if (globalCompetency.english?.ielts) {
+          languageTests.English = languageTests.English || { tests: [] };
+          languageTests.English.tests.push({ value: 'IELTS', label: 'IELTS', hasScore: true, scoreRange: '1.0-9.0점', criteria: globalCompetency.english.ielts });
+        }
+        if (globalCompetency.english?.teps) {
+          languageTests.English = languageTests.English || { tests: [] };
+          languageTests.English.tests.push({ value: 'TEPS', label: 'TEPS', hasScore: true, scoreRange: '0-600점', criteria: globalCompetency.english.teps });
+        }
+        if (globalCompetency.japanese?.jlpt) {
+          languageTests.Japanese = languageTests.Japanese || { tests: [] };
+          languageTests.Japanese.tests.push({ value: 'JLPT', label: 'JLPT', hasLevel: true, levels: ['N1', 'N2', 'N3', 'N4', 'N5'], criteria: globalCompetency.japanese.jlpt });
+        }
+        if (globalCompetency.japanese?.jpt) {
+          languageTests.Japanese = languageTests.Japanese || { tests: [] };
+          languageTests.Japanese.tests.push({ value: 'JPT', label: 'JPT', hasScore: true, scoreRange: '10-990점', criteria: globalCompetency.japanese.jpt });
+        }
+        if (globalCompetency.chinese?.hsk) {
+          languageTests.Chinese = languageTests.Chinese || { tests: [] };
+          languageTests.Chinese.tests.push({ value: 'HSK', label: 'HSK', hasLevel: true, levels: ['1급', '2급', '3급', '4급', '5급', '6급'], criteria: globalCompetency.chinese.hsk });
+        }
+        if (globalCompetency.chinese?.tocfl) {
+          languageTests.Chinese = languageTests.Chinese || { tests: [] };
+          languageTests.Chinese.tests.push({ value: 'TOCFL', label: 'TOCFL', hasLevel: true, levels: ['Band A (Level 1)', 'Band A (Level 2)', 'Band B (Level 3)', 'Band B (Level 4)', 'Band C (Level 5)', 'Band C (Level 6)'], criteria: globalCompetency.chinese.tocfl });
+        }
+        return res.json({
+          success: true,
+          rdEvaluationCriteria: storedCriteria,
+          detailedCriteria: storedDetailedCriteria,
+          criteria,
+          languageTests,
+        });
+      }
 
       // data.json에서 직접 기준 조회
       const dataPath = path.join(process.cwd(), 'data.json');
@@ -1498,18 +1563,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Departments and Teams routes
   app.get("/api/departments", async (req, res) => {
     try {
-
-      // data.json에서 부서 데이터 로드
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let departments = [];
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        const data = JSON.parse(fileContent);
-        departments = data.departments || [];
-      }
-
-      res.json(departments);
+      const departments = await storage.getDepartments();
+      return res.json(departments);
     } catch (error) {
       console.error("부서 조회 오류:", error);
       res.status(500).json({ error: "부서를 불러올 수 없습니다." });
@@ -1519,38 +1574,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/departments", async (req, res) => {
     try {
       const { code, name } = req.body;
-
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let data = {};
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
-      // 부서 데이터 추가
-      if (!data.departments) {
-        data.departments = [];
-      }
-
-      // 중복 체크
-      if (data.departments.find((d: any) => d.code === code)) {
+      const departments = await storage.getDepartments();
+      if (departments.find((department) => department.code === code)) {
         return res.status(400).json({ error: "이미 존재하는 부서코드입니다." });
       }
-
-      const newDepartment = {
-        code,
-        name,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      data.departments.push(newDepartment);
-
-      // 파일 저장
-      fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-
-      res.json({ success: true, data: newDepartment });
+      const department = await storage.createDepartment({ code, name });
+      return res.json({ success: true, data: department });
     } catch (error) {
       console.error("부서 추가 오류:", error);
       res.status(500).json({ error: "부서를 추가할 수 없습니다." });
@@ -1561,34 +1590,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { code } = req.params;
       const { name } = req.body;
-
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let data = {};
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
-      if (!data.departments) {
-        return res.status(404).json({ error: "부서를 찾을 수 없습니다." });
-      }
-
-      const departmentIndex = data.departments.findIndex((d: any) => d.code === code);
-      if (departmentIndex === -1) {
-        return res.status(404).json({ error: "부서를 찾을 수 없습니다." });
-      }
-
-      data.departments[departmentIndex] = {
-        ...data.departments[departmentIndex],
-        name,
-        updatedAt: new Date().toISOString()
-      };
-
-      // 파일 저장
-      fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-
-      res.json({ success: true, data: data.departments[departmentIndex] });
+      const department = await storage.updateDepartment(code, { name });
+      return res.json({ success: true, data: department });
     } catch (error) {
       console.error("부서 수정 오류:", error);
       res.status(500).json({ error: "부서를 수정할 수 없습니다." });
@@ -1598,35 +1601,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/departments/:code", async (req, res) => {
     try {
       const { code } = req.params;
-
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let data = {};
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
-      if (!data.departments) {
+      const success = await storage.deleteDepartment(code);
+      if (!success) {
         return res.status(404).json({ error: "부서를 찾을 수 없습니다." });
       }
-
-      const departmentIndex = data.departments.findIndex((d: any) => d.code === code);
-      if (departmentIndex === -1) {
-        return res.status(404).json({ error: "부서를 찾을 수 없습니다." });
-      }
-
-      // 관련 팀도 삭제
-      if (data.teams) {
-        data.teams = data.teams.filter((t: any) => t.departmentCode !== code);
-      }
-
-      data.departments.splice(departmentIndex, 1);
-
-      // 파일 저장
-      fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-
-      res.json({ success: true });
+      return res.json({ success: true });
     } catch (error) {
       console.error("부서 삭제 오류:", error);
       res.status(500).json({ error: "부서를 삭제할 수 없습니다." });
@@ -1636,23 +1615,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/teams", async (req, res) => {
     try {
       const { departmentCode } = req.query;
-
-      // data.json에서 팀 데이터 로드
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let teams = [];
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        const data = JSON.parse(fileContent);
-        teams = data.teams || [];
-
-        // 부서코드가 있으면 필터링
-        if (departmentCode) {
-          teams = teams.filter((t: any) => t.departmentCode === departmentCode);
-        }
-      }
-
-      res.json(teams);
+      const teams = await storage.getTeams(typeof departmentCode === "string" ? departmentCode : undefined);
+      return res.json(teams);
     } catch (error) {
       console.error("팀 조회 오류:", error);
       res.status(500).json({ error: "팀을 불러올 수 없습니다." });
@@ -1662,39 +1626,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/teams", async (req, res) => {
     try {
       const { code, name, departmentCode } = req.body;
-
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let data = {};
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
-      // 팀 데이터 추가
-      if (!data.teams) {
-        data.teams = [];
-      }
-
-      // 중복 체크
-      if (data.teams.find((t: any) => t.code === code)) {
+      const teams = await storage.getTeams();
+      if (teams.find((team) => team.code === code)) {
         return res.status(400).json({ error: "이미 존재하는 팀코드입니다." });
       }
-
-      const newTeam = {
-        code,
-        name,
-        departmentCode,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      data.teams.push(newTeam);
-
-      // 파일 저장
-      fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-
-      res.json({ success: true, data: newTeam });
+      const team = await storage.createTeam({ code, name, departmentCode });
+      return res.json({ success: true, data: team });
     } catch (error) {
       console.error("팀 추가 오류:", error);
       res.status(500).json({ error: "팀을 추가할 수 없습니다." });
@@ -1705,35 +1642,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { code } = req.params;
       const { name, departmentCode } = req.body;
-
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let data = {};
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
-      if (!data.teams) {
-        return res.status(404).json({ error: "팀을 찾을 수 없습니다." });
-      }
-
-      const teamIndex = data.teams.findIndex((t: any) => t.code === code);
-      if (teamIndex === -1) {
-        return res.status(404).json({ error: "팀을 찾을 수 없습니다." });
-      }
-
-      data.teams[teamIndex] = {
-        ...data.teams[teamIndex],
-        name,
-        departmentCode,
-        updatedAt: new Date().toISOString()
-      };
-
-      // 파일 저장
-      fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-
-      res.json({ success: true, data: data.teams[teamIndex] });
+      const team = await storage.updateTeam(code, { name, departmentCode });
+      return res.json({ success: true, data: team });
     } catch (error) {
       console.error("팀 수정 오류:", error);
       res.status(500).json({ error: "팀을 수정할 수 없습니다." });
@@ -1743,31 +1653,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/teams/:code", async (req, res) => {
     try {
       const { code } = req.params;
-
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let data: any = {};
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
-      if (!data.teams) {
+      const success = await storage.deleteTeam(code);
+      if (!success) {
         return res.status(404).json({ error: "팀을 찾을 수 없습니다." });
       }
-
-      const teamIndex = data.teams.findIndex((t: any) => t.code === code);
-
-      if (teamIndex === -1) {
-        return res.status(404).json({ error: "팀을 찾을 수 없습니다." });
-      }
-
-      data.teams.splice(teamIndex, 1);
-
-      // 파일 저장
-      fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-
-      res.json({ success: true });
+      return res.json({ success: true });
     } catch (error) {
       console.error("팀 삭제 오류:", error);
       res.status(500).json({ error: "팀을 삭제할 수 없습니다." });
@@ -1778,49 +1668,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/proposals", async (req, res) => {
     try {
       const { employeeId, startDate, endDate } = req.query;
-
-      // data.json에서 제안제도 데이터 로드
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let proposals = [];
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        const data = JSON.parse(fileContent);
-
-        // proposals가 객체인 경우 배열로 변환
-        if (data.proposals) {
-          if (Array.isArray(data.proposals)) {
-            proposals = data.proposals;
-          } else {
-            // 객체인 경우 배열로 변환
-            proposals = Object.values(data.proposals);
-          }
-        }
-
-        // employeeId가 있으면 필터링
-        if (employeeId) {
-          proposals = proposals.filter((p: any) => p.employeeId === employeeId);
-        }
-
-        // 날짜 필터링 적용
-        if (startDate || endDate) {
-          proposals = proposals.filter((proposal: any) => {
-            const proposalDate = proposal.submissionDate;
-            if (!proposalDate) return false; // 날짜가 없는 제안은 제외
-
-            const date = new Date(proposalDate);
-            if (isNaN(date.getTime())) return false; // 유효하지 않은 날짜는 제외
-
-            if (startDate && date < new Date(startDate)) return false;
-            if (endDate && date > new Date(endDate)) return false;
-
-            return true;
-          });
-        }
-      }
-
+      const proposals = await storage.getProposals({
+        employeeId: typeof employeeId === "string" ? employeeId : undefined,
+        startDate: typeof startDate === "string" ? startDate : undefined,
+        endDate: typeof endDate === "string" ? endDate : undefined,
+      });
       console.log('✅ 제안제도 데이터 로드 완료:', proposals.length, '개');
-      res.json(proposals);
+      return res.json(proposals);
     } catch (error) {
       console.error("제안제도 조회 오류:", error);
       res.status(500).json({ error: "제안제도를 불러올 수 없습니다." });
@@ -1833,21 +1687,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('🔧 제안제도 저장 요청:', JSON.stringify(proposalData, null, 2));
       console.log('🔧 요청 헤더:', req.headers);
       console.log('🔧 Content-Type:', req.headers['content-type']);
-
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      let data = {};
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
-      // 제안제도 데이터 추가
-      if (!data.proposals) {
-        data.proposals = {};
-      }
-
-      // ID 생성
       const newId = `proposal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const newProposal = {
         id: newId,
@@ -1855,15 +1694,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
-
-      data.proposals[newId] = newProposal;
-
-      // 파일 저장
-      fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
+      await storage.createProposal(newProposal as any);
       console.log('✅ 제안제도 저장 완료:', newId);
       console.log('✅ 저장된 제안제도 데이터:', JSON.stringify(newProposal, null, 2));
-
-      res.json({ success: true, id: newId, data: newProposal });
+      return res.json({ success: true, id: newId, data: newProposal });
     } catch (error) {
       console.error("❌ 제안제도 저장 오류:", error);
       console.error("❌ 오류 스택:", error.stack);
@@ -1880,9 +1714,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { employeeId } = req.query;
 
-      if (!employeeId) {
+      if (!employeeId || typeof employeeId !== "string") {
         return res.status(400).json({ error: "employeeId is required" });
       }
+      const deletedCount = await storage.deleteProposalsByEmployee(employeeId);
+      console.log(`✅ ${employeeId} 직원의 제안제도 ${deletedCount}개 삭제 완료`);
+      return res.json({ success: true, deletedCount });
 
       const dataPath = path.join(process.cwd(), 'data.json');
 
@@ -3149,6 +2986,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/achievements/categories", async (req, res) => {
     try {
       console.log('🔍 성과관리 분야/카테고리 조회 요청');
+      const storedDetailedCriteria = (await storage.getAppSetting("detailedCriteria")) || {};
+      if (Object.keys(storedDetailedCriteria).length > 0) {
+        const categories = {
+          patentStatus: Array.isArray(Object.keys(storedDetailedCriteria.rd_achievement?.patents || {}))
+            ? Object.keys(storedDetailedCriteria.rd_achievement?.patents || {})
+            : [],
+          publicationLevels: Array.isArray(Object.keys(storedDetailedCriteria.rd_achievement?.publications || {}))
+            ? Object.keys(storedDetailedCriteria.rd_achievement?.publications || {})
+            : [],
+          awardLevels: ["국제", "국가", "산업", "사내"]
+        };
+
+        return res.json({
+          success: true,
+          categories,
+        });
+      }
 
       // data.json에서 상세 기준 조회
       const dataPath = path.join(process.cwd(), 'data.json');

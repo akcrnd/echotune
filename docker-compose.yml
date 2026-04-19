@@ -1,35 +1,13 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: echotune-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: echotune
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d echotune"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    volumes:
-      - echotune_postgres:/var/lib/postgresql/data
-
   echotune:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: echotune
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "22023:5000"
     environment:
       NODE_ENV: production
       PORT: 5000
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/echotune
-
-volumes:
-  echotune_postgres:
+      DATABASE_URL: ${DATABASE_URL}

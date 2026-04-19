@@ -1,5 +1,5 @@
 // R&D 역량평가 기준 타입 정의 (하드코딩된 기본값은 제거됨)
-// 실제 기준은 data.json의 detailedCriteria에서 관리됨
+// 실제 기준은 런타임 저장소(app settings)에서 관리됨
 
 export interface RdEvaluationCriteria {
   id: string;
@@ -26,8 +26,8 @@ export interface EvaluationRule {
   maxScore?: number; // 최대 점수 (count, sum 연산용)
 }
 
-// 하드코딩된 기본값은 제거됨 - data.json의 detailedCriteria 사용
+// 하드코딩된 기본값은 제거됨 - 런타임 저장소의 detailedCriteria 사용
 export const RD_EVALUATION_CRITERIA: RdEvaluationCriteria[] = [];
 
 // 이 파일의 함수들은 더 이상 사용되지 않음
-// 실제 점수 계산은 server/rd-evaluation-auto.ts에서 data.json의 detailedCriteria를 사용
+// 실제 점수 계산은 server/rd-evaluation-auto.ts에서 런타임 저장소의 detailedCriteria를 사용

@@ -22,13 +22,6 @@ async function loadDetailedCriteria(): Promise<any> {
   if (stored) {
     return stored;
   }
-
-  const dataPath = path.join(process.cwd(), 'data.json');
-  if (fs.existsSync(dataPath)) {
-    const fileContent = fs.readFileSync(dataPath, 'utf8');
-    const data = JSON.parse(fileContent);
-    return data.detailedCriteria || {};
-  }
   return {};
 }
 
@@ -1272,13 +1265,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // data.json에서 직접 기준 조회
-      const dataPath = path.join(process.cwd(), 'data.json');
-      const dataContent = fs.readFileSync(dataPath, 'utf8');
-      const data = JSON.parse(dataContent);
-
-      // detailedCriteria에서 기준 추출
-      let criteria = data.detailedCriteria || {};
+      // DB에 저장된 값이 없으면 기본 기준을 사용
+      let criteria: any = {};
 
       if (Object.keys(criteria).length === 0) {
         // 기본 설정 반환
@@ -1400,8 +1388,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         success: true,
-        rdEvaluationCriteria: data.rdEvaluationCriteria || {},
-        detailedCriteria: data.detailedCriteria || {},
+        rdEvaluationCriteria: {},
+        detailedCriteria: {},
         criteria: criteria,
         languageTests: languageTests
       });
@@ -1421,17 +1409,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { criteria, updateEmployeeForms } = req.body;
 
 
-      // 1. R&D 역량평가 기준을 파일에 저장
-      const criteriaPath = path.join(__dirname, '..', 'data', 'rd-evaluation-criteria.json');
-
-      // 디렉토리가 없으면 생성
-      const dataDir = path.dirname(criteriaPath);
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
-
-      // 기준 저장
-      fs.writeFileSync(criteriaPath, JSON.stringify(criteria, null, 2));
       await storage.setAppSetting("rdEvaluationCriteria", criteria);
 
       // 2. 직원 정보 입력 폼 업데이트가 요청된 경우
@@ -1720,34 +1697,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const deletedCount = await storage.deleteProposalsByEmployee(employeeId);
       console.log(`✅ ${employeeId} 직원의 제안제도 ${deletedCount}개 삭제 완료`);
       return res.json({ success: true, deletedCount });
-
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      if (!fs.existsSync(dataPath)) {
-        return res.json({ success: true, deletedCount: 0 });
-      }
-
-      const fileContent = fs.readFileSync(dataPath, 'utf8');
-      const data = JSON.parse(fileContent);
-
-      if (!data.proposals) {
-        return res.json({ success: true, deletedCount: 0 });
-      }
-
-      // 해당 직원의 제안들만 삭제
-      const proposalsToDelete = Object.keys(data.proposals).filter(
-        key => data.proposals[key].employeeId === employeeId
-      );
-
-      proposalsToDelete.forEach(key => {
-        delete data.proposals[key];
-      });
-
-      // 파일 저장
-      fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-      console.log(`✅ ${employeeId} 직원의 제안제도 ${proposalsToDelete.length}개 삭제 완료`);
-
-      res.json({ success: true, deletedCount: proposalsToDelete.length });
     } catch (error) {
       console.error("❌ 제안제도 삭제 오류:", error);
       res.status(500).json({ error: "제안제도를 삭제할 수 없습니다." });
@@ -2828,17 +2777,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       };
 
-      // data.json에서 기준 조회
-      const dataPath = path.join(process.cwd(), 'data.json');
-
       let criteria: any;
-      let data: any = {}; // data 변수를 함수 스코프로 이동
-      if (fs.existsSync(dataPath)) {
-        // data.json에서 R&D 평가 기준 로드
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-        criteria = data.rdEvaluationCriteria || {};
-        console.log('✅ data.json에서 R&D 역량평가 기준 로드:', criteria);
+      const storedCriteria = (await storage.getAppSetting("rdEvaluationCriteria")) || {};
+      const storedDetailedCriteria = (await storage.getAppSetting("detailedCriteria")) || {};
+      if (Object.keys(storedCriteria).length > 0) {
+        criteria = storedCriteria;
+        console.log('✅ DB에서 R&D 역량평가 기준 로드:', criteria);
       } else {
         // 기본 기준 설정
         criteria = {
@@ -2871,8 +2815,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // 상세 기준도 병합
       const mergedDetailedCriteria: any = { ...defaultDetailedCriteria };
-      if (data.detailedCriteria) {
-        for (const [key, value] of Object.entries(data.detailedCriteria)) {
+      if (Object.keys(storedDetailedCriteria).length > 0) {
+        for (const [key, value] of Object.entries(storedDetailedCriteria)) {
           if (mergedDetailedCriteria[key]) {
             mergedDetailedCriteria[key] = { ...mergedDetailedCriteria[key], ...value };
           }
@@ -2941,35 +2885,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('🔧 R&D 역량평가 기준 저장 요청 (routes.ts):', { criteria, detailedCriteria, updateEmployeeForms });
 
-      // data.json에 기준 저장
-
-      // 프로젝트 루트 기준으로 경로 설정
-      const dataPath = path.join(process.cwd(), 'data.json');
-
-      // 기존 data.json 로드
-      let data: any = {};
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
-      // R&D 평가 기준 업데이트
-      data.rdEvaluationCriteria = criteria;
-      if (detailedCriteria) {
-        data.detailedCriteria = detailedCriteria;
-      }
       await storage.setAppSetting("rdEvaluationCriteria", criteria);
       if (detailedCriteria) {
         await storage.setAppSetting("detailedCriteria", detailedCriteria);
-      }
-
-      // 기준 저장
-      try {
-        fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-        console.log('✅ data.json에 R&D 역량평가 기준 저장 완료:', dataPath);
-      } catch (writeError) {
-        console.error('❌ 파일 쓰기 오류:', writeError);
-        throw new Error(`파일 저장 실패: ${writeError.message}`);
       }
 
       res.json({
@@ -3004,15 +2922,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // data.json에서 상세 기준 조회
-      const dataPath = path.join(process.cwd(), 'data.json');
-      let data: any = {};
-
-      if (fs.existsSync(dataPath)) {
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        data = JSON.parse(fileContent);
-      }
-
       // ⚠️ 폴백용 기본 상세 기준 (data.json에 저장된 값이 없을 경우에만 사용)
       // 사용자가 UI에서 설정한 값이 항상 우선됩니다.
       const defaultDetailedCriteria = {
@@ -3045,7 +2954,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       };
 
-      const detailedCriteria = data.detailedCriteria || defaultDetailedCriteria;
+      const detailedCriteria = defaultDetailedCriteria;
 
       // 성과관리 등록용 카테고리 추출 (각 메뉴에 맞는 항목만)
       const categories = {

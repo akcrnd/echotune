@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import * as d3 from "d3";
 import { OrgChart } from "d3-org-chart";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -389,6 +389,9 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
   // 부서/팀/직원 추가 모달 상태
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalType, setAddModalType] = useState<'department' | 'team' | 'employee' | 'new-employee'>('department');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteModalType, setDeleteModalType] = useState<'department' | 'team'>('department');
+  const [deleteTargetCode, setDeleteTargetCode] = useState('');
   const emptyAddModalData: AddModalData = {
     code: '',
     name: '',
@@ -415,6 +418,12 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
     setAddModalType('employee');
     setAddModalData({ ...emptyAddModalData });
     setShowAddModal(true);
+  };
+
+  const openDeleteModal = (type: 'department' | 'team') => {
+    setDeleteModalType(type);
+    setDeleteTargetCode('');
+    setShowDeleteModal(true);
   };
 
   const loadDepartmentTeamData = async () => {
@@ -461,6 +470,66 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
         title: "팀 추가 실패", 
         description: error instanceof Error ? error.message : "알 수 없는 오류",
         variant: "destructive" 
+      });
+    }
+  };
+
+  const handleDeleteDepartment = async () => {
+    if (!deleteTargetCode) return;
+
+    const department = departments.find(dept => dept.code === deleteTargetCode);
+    const employeeCount = employees.filter((employee: any) => employee.departmentCode === deleteTargetCode).length;
+    if (employeeCount > 0) {
+      toast({
+        title: "부서 삭제 불가",
+        description: `${department?.name || deleteTargetCode}에 소속된 직원이 ${employeeCount}명 있습니다. 직원을 먼저 다른 부서로 이동하세요.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      await DepartmentTeamManager.removeDepartment(deleteTargetCode);
+      await loadDepartmentTeamData();
+      queryClient.invalidateQueries({ queryKey: ['/api/employees'] });
+      setShowDeleteModal(false);
+      setDeleteTargetCode('');
+      toast({ title: "부서가 삭제되었습니다." });
+    } catch (error) {
+      toast({
+        title: "부서 삭제 실패",
+        description: error instanceof Error ? error.message : "알 수 없는 오류",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleDeleteTeam = async () => {
+    if (!deleteTargetCode) return;
+
+    const team = teams.find(item => item.code === deleteTargetCode);
+    const employeeCount = employees.filter((employee: any) => employee.teamCode === deleteTargetCode).length;
+    if (employeeCount > 0) {
+      toast({
+        title: "팀 삭제 불가",
+        description: `${team?.name || deleteTargetCode}에 소속된 직원이 ${employeeCount}명 있습니다. 직원을 먼저 다른 팀으로 이동하세요.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      await DepartmentTeamManager.removeTeam(deleteTargetCode);
+      await loadDepartmentTeamData();
+      queryClient.invalidateQueries({ queryKey: ['/api/employees'] });
+      setShowDeleteModal(false);
+      setDeleteTargetCode('');
+      toast({ title: "팀이 삭제되었습니다." });
+    } catch (error) {
+      toast({
+        title: "팀 삭제 실패",
+        description: error instanceof Error ? error.message : "알 수 없는 오류",
+        variant: "destructive"
       });
     }
   };
@@ -2482,6 +2551,22 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
                       팀 추가
                     </button>
                   </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openDeleteModal('department')}
+                      className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 flex items-center gap-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      부서 삭제
+                    </button>
+                    <button
+                      onClick={() => openDeleteModal('team')}
+                      className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 flex items-center gap-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      팀 삭제
+                    </button>
+                  </div>
               </div>
             )}
             </div>
@@ -2607,6 +2692,59 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
               {addModalType === 'department' ? '부서 추가' : 
                addModalType === 'team' ? '팀 추가' : 
                addModalType === 'employee' ? '직원 추가' : '신규 직원 추가'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 부서/팀 삭제 모달 */}
+      <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {deleteModalType === 'department' ? '부서 삭제' : '팀 삭제'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="deleteTargetCode">
+                {deleteModalType === 'department' ? '삭제할 부서' : '삭제할 팀'}
+              </Label>
+              <Select value={deleteTargetCode} onValueChange={setDeleteTargetCode}>
+                <SelectTrigger id="deleteTargetCode">
+                  <SelectValue placeholder={deleteModalType === 'department' ? '부서 선택' : '팀 선택'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {deleteModalType === 'department'
+                    ? departments.map(dept => (
+                        <SelectItem key={dept.code} value={dept.code}>
+                          {dept.name} ({dept.code})
+                        </SelectItem>
+                      ))
+                    : teams.map(team => (
+                        <SelectItem key={team.code} value={team.code}>
+                          {team.name} ({team.code})
+                        </SelectItem>
+                      ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {deleteModalType === 'department'
+                ? '부서를 삭제하면 소속 팀도 함께 삭제됩니다. 소속 직원이 있는 부서는 삭제할 수 없습니다.'
+                : '소속 직원이 있는 팀은 삭제할 수 없습니다.'}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteModal(false)}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={deleteModalType === 'department' ? handleDeleteDepartment : handleDeleteTeam}
+              disabled={!deleteTargetCode}
+            >
+              삭제
             </Button>
           </DialogFooter>
         </DialogContent>

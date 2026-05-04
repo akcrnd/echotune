@@ -21,6 +21,17 @@ interface D3OrgChartProps {
   onEmployeeSelect: (employeeId: string) => void;
 }
 
+type AddModalData = {
+  code: string;
+  name: string;
+  departmentCode: string;
+  department: string;
+  teamCode: string;
+  team: string;
+  inheritFrom: string;
+  managerId?: string;
+};
+
 export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmployeeSelect }: D3OrgChartProps) {
   
   // 직원 역할 판별 함수 (체크박스 기반)
@@ -378,7 +389,16 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
   // 부서/팀/직원 추가 모달 상태
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalType, setAddModalType] = useState<'department' | 'team' | 'employee' | 'new-employee'>('department');
-  const [addModalData, setAddModalData] = useState({ 
+  const emptyAddModalData: AddModalData = {
+    code: '',
+    name: '',
+    departmentCode: '',
+    department: '',
+    teamCode: '',
+    team: '',
+    inheritFrom: ''
+  };
+  const [addModalData, setAddModalData] = useState<AddModalData>({
     code: '', 
     name: '', 
     departmentCode: '',
@@ -389,23 +409,35 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
   });
   const [departments, setDepartments] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
+  const isEmptyChart = employees.length === 0;
+
+  const openFirstEmployeeModal = () => {
+    setAddModalType('employee');
+    setAddModalData({ ...emptyAddModalData });
+    setShowAddModal(true);
+  };
+
+  const loadDepartmentTeamData = async () => {
+    const [deptData, teamData] = await Promise.all([
+      DepartmentTeamManager.getAllDepartments(),
+      DepartmentTeamManager.getAllTeams()
+    ]);
+    setDepartments(Array.isArray(deptData) ? deptData : []);
+    setTeams(Array.isArray(teamData) ? teamData : []);
+  };
 
   // 부서/팀 데이터 로드
   useEffect(() => {
-    const deptData = DepartmentTeamManager.getAllDepartments();
-    const teamData = DepartmentTeamManager.getAllTeams();
-    setDepartments(deptData);
-    setTeams(teamData);
+    void loadDepartmentTeamData();
   }, []);
 
   // 부서 추가 함수
-  const handleAddDepartment = () => {
+  const handleAddDepartment = async () => {
     try {
-      DepartmentTeamManager.addDepartment(addModalData.code, addModalData.name);
-      const deptData = DepartmentTeamManager.getAllDepartments();
-      setDepartments(deptData);
+      await DepartmentTeamManager.addDepartment(addModalData.code, addModalData.name);
+      await loadDepartmentTeamData();
       setShowAddModal(false);
-      setAddModalData({ code: '', name: '', departmentCode: '' });
+      setAddModalData({ ...emptyAddModalData });
       toast({ title: "부서가 추가되었습니다." });
     } catch (error) {
       toast({
@@ -417,13 +449,12 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
   };
 
   // 팀 추가 함수
-  const handleAddTeam = () => {
+  const handleAddTeam = async () => {
     try {
-      DepartmentTeamManager.addTeam(addModalData.code, addModalData.name, addModalData.departmentCode);
-      const teamData = DepartmentTeamManager.getAllTeams();
-      setTeams(teamData);
+      await DepartmentTeamManager.addTeam(addModalData.code, addModalData.name, addModalData.departmentCode);
+      await loadDepartmentTeamData();
       setShowAddModal(false);
-      setAddModalData({ code: '', name: '', departmentCode: '' });
+      setAddModalData({ ...emptyAddModalData });
       toast({ title: "팀이 추가되었습니다." });
     } catch (error) {
       toast({
@@ -486,7 +517,8 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
           description: "새 직원이 성공적으로 추가되었습니다.",
         });
         setShowAddModal(false);
-        setAddModalData({ code: '', name: '', departmentCode: '', department: '', teamCode: '', team: '', inheritFrom: '' });
+        setAddModalData({ ...emptyAddModalData });
+        queryClient.invalidateQueries({ queryKey: ['/api/employees'] });
         
         // 서버에서 최신 데이터를 가져와서 조직도에 새 직원 표시
         try {
@@ -553,7 +585,8 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
           description: `${addModalData.department} ${addModalData.team}에 새 직원이 추가되었습니다.`,
         });
         setShowAddModal(false);
-        setAddModalData({ code: '', name: '', departmentCode: '', department: '', teamCode: '', team: '', inheritFrom: '' });
+        setAddModalData({ ...emptyAddModalData });
+        queryClient.invalidateQueries({ queryKey: ['/api/employees'] });
         
         // 서버에서 최신 데이터를 가져와서 조직도에 새 직원 표시
         try {
@@ -1962,7 +1995,13 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
 
   // 차트 렌더링
   useEffect(() => {
-    if (!chartRef.current || !employees || employees.length === 0) return;
+    if (!chartRef.current || !employees) return;
+
+    if (employees.length === 0) {
+      d3.select(chartRef.current).selectAll("*").remove();
+      chartInstance.current = null;
+      return;
+    }
 
     const data = transformEmployeesData;
     
@@ -2051,14 +2090,14 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
       // (+) 노드 클릭 처리
       if (nodeId === 'add-department') {
         setAddModalType('department');
-        setAddModalData({ code: '', name: '', departmentCode: '' });
+        setAddModalData({ ...emptyAddModalData });
         setShowAddModal(true);
         return;
       }
       
       if (nodeId.startsWith('add-team-')) {
         setAddModalType('team');
-        setAddModalData({ code: '', name: '', departmentCode: '' });
+        setAddModalData({ ...emptyAddModalData });
         setShowAddModal(true);
         return;
       }
@@ -2066,7 +2105,7 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
       if (nodeId.startsWith('add-employee-')) {
         // 직원 추가 모달 (새로운 모달 타입)
         setAddModalType('employee');
-        setAddModalData({ code: '', name: '', departmentCode: '' });
+        setAddModalData({ ...emptyAddModalData });
         setShowAddModal(true);
         return;
       }
@@ -2341,110 +2380,133 @@ export default function D3OrgChart({ employees, searchTerm, zoomLevel, onEmploye
         }
       `}</style>
       
-      {/* 조직도 뷰 컨트롤 패널 - 왼쪽 하단 */}
-      <div className="absolute bottom-4 left-4 z-20 bg-card border border-border rounded-lg p-3 shadow-lg">
-        <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
-            <button 
-              onClick={saveCurrentView}
-              className="px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-            >
-              현재 보기 저장
-            </button>
-            <button 
-              onClick={expandAll}
-              className="px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
-            >
-              모두 열기
-            </button>
-            <button 
-              onClick={collapseAll}
-              className="px-3 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 text-sm"
-            >
-              모두 닫기
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 드래그 앤 드롭 컨트롤 패널 */}
-      <div className="absolute top-4 right-4 z-20 bg-card border border-border rounded-lg p-3 shadow-lg">
-        <div className="flex flex-col gap-2">
-          {!dragEnabled ? (
-            <div className="flex gap-2">
-              <button 
-                onClick={enableDrag}
-                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-              >
-                조직 정리
-              </button>
-              <button 
-                onClick={saveData}
-                className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
-              >
-                저장
-              </button>
-            </div>
-          ) : (
+      {!isEmptyChart && (
+        <>
+          {/* 조직도 뷰 컨트롤 패널 - 왼쪽 하단 */}
+          <div className="absolute bottom-4 left-4 z-20 bg-card border border-border rounded-lg p-3 shadow-lg">
             <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
-                <button 
-                  onClick={disableDrag}
-                  className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-                >
-                  완료
-                </button>
-                <button 
-                  onClick={cancelDrag}
-                  className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-                >
-                  취소
-                </button>
-              </div>
               <div className="flex gap-2">
                 <button 
-                  onClick={undo}
-                  disabled={undoActions.length === 0}
-                  className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+                  onClick={saveCurrentView}
+                  className="px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
                 >
-                  되돌리기
+                  현재 보기 저장
                 </button>
                 <button 
-                  onClick={redo}
-                  disabled={redoActions.length === 0}
-                  className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+                  onClick={expandAll}
+                  className="px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
                 >
-                  다시하기
+                  모두 열기
+                </button>
+                <button 
+                  onClick={collapseAll}
+                  className="px-3 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 text-sm"
+                >
+                  모두 닫기
                 </button>
               </div>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => {
-                    setAddModalType('department');
-                    setAddModalData({ code: '', name: '', departmentCode: '' });
-                    setShowAddModal(true);
-                  }}
-                  className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  부서 추가
-                </button>
-                <button 
-                  onClick={() => {
-                    setAddModalType('team');
-                    setAddModalData({ code: '', name: '', departmentCode: '' });
-                    setShowAddModal(true);
-                  }}
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  팀 추가
-                </button>
-              </div>
+            </div>
           </div>
-        )}
+
+          {/* 드래그 앤 드롭 컨트롤 패널 */}
+          <div className="absolute top-4 right-4 z-20 bg-card border border-border rounded-lg p-3 shadow-lg">
+            <div className="flex flex-col gap-2">
+              {!dragEnabled ? (
+                <div className="flex gap-2">
+                  <button
+                    onClick={enableDrag}
+                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  >
+                    조직 정리
+                  </button>
+                  <button
+                    onClick={saveData}
+                    className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
+                  >
+                    저장
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                    <button
+                      onClick={disableDrag}
+                      className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+                    >
+                      완료
+                    </button>
+                    <button
+                      onClick={cancelDrag}
+                      className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                    >
+                      취소
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={undo}
+                      disabled={undoActions.length === 0}
+                      className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+                    >
+                      되돌리기
+                    </button>
+                    <button
+                      onClick={redo}
+                      disabled={redoActions.length === 0}
+                      className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+                    >
+                      다시하기
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setAddModalType('department');
+                        setAddModalData({ ...emptyAddModalData });
+                        setShowAddModal(true);
+                      }}
+                      className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      부서 추가
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAddModalType('team');
+                        setAddModalData({ ...emptyAddModalData });
+                        setShowAddModal(true);
+                      }}
+                      className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      팀 추가
+                    </button>
+                  </div>
+              </div>
+            )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {isEmptyChart && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center px-4 pointer-events-none">
+          <button
+            type="button"
+            onClick={openFirstEmployeeModal}
+            className="pointer-events-auto group flex h-44 w-[280px] flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-primary/40 bg-card/95 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-primary hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+            data-testid="button-add-first-org-node"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-primary transition group-hover:bg-primary group-hover:text-primary-foreground">
+              <Plus className="h-5 w-5" />
+            </span>
+            <span className="text-base font-semibold text-foreground">첫 직원 추가</span>
+            <span className="max-w-[220px] text-sm leading-5 text-muted-foreground">
+              이 칸에서 조직도의 첫 노드를 시작합니다.
+            </span>
+          </button>
         </div>
-      </div>
+      )}
 
       <div 
         ref={chartRef} 

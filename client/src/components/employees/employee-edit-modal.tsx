@@ -596,13 +596,15 @@ export default function EmployeeEditModal({ employee, isOpen, onClose }: Employe
       {/* 부서/팀 관리 모달 */}
       <DepartmentTeamManagerModal
         isOpen={isDepartmentTeamManagerOpen}
-        onClose={() => {
+        onClose={async () => {
           setIsDepartmentTeamManagerOpen(false);
           // 부서/팀 데이터 새로고침
-          const deptData = DepartmentTeamManager.getAllDepartments();
-          const teamData = DepartmentTeamManager.getAllTeams();
-          setDepartments(deptData);
-          setTeams(teamData);
+          const [deptData, teamData] = await Promise.all([
+            DepartmentTeamManager.getAllDepartments(),
+            DepartmentTeamManager.getAllTeams()
+          ]);
+          setDepartments(Array.isArray(deptData) ? deptData : []);
+          setTeams(Array.isArray(teamData) ? teamData : []);
         }}
       />
     </Dialog>

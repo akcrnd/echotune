@@ -25,6 +25,34 @@ async function loadDetailedCriteria(): Promise<any> {
   return {};
 }
 
+function normalizeEmployeeRequestBody(body: Record<string, any>): Record<string, any> {
+  const normalized = { ...body };
+
+  for (const field of ["isDepartmentHead", "isActive"]) {
+    if (normalized[field] !== undefined && normalized[field] !== null) {
+      normalized[field] = normalized[field] === true || normalized[field] === "true";
+    }
+  }
+
+  for (const field of ["birthDate", "hireDate"]) {
+    if (normalized[field] === "") {
+      normalized[field] = null;
+    } else if (typeof normalized[field] === "string") {
+      normalized[field] = new Date(normalized[field]);
+    }
+  }
+
+  for (const field of ["graduationYear", "previousExperienceYears", "previousExperienceMonths"]) {
+    if (normalized[field] === "") {
+      normalized[field] = null;
+    } else if (typeof normalized[field] === "string") {
+      normalized[field] = Number(normalized[field]);
+    }
+  }
+
+  return normalized;
+}
+
 // Helper function to parse Excel dates
 function parseExcelDate(cellValue: any): string | null {
   if (!cellValue) return null;
@@ -152,10 +180,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/employees", async (req, res) => {
     try {
-      const employeeData = insertEmployeeSchema.parse(req.body);
+      const employeeData = insertEmployeeSchema.parse(normalizeEmployeeRequestBody(req.body));
       const employee = await storage.createEmployee(employeeData);
       res.status(201).json(employee);
     } catch (error) {
+      console.error("직원 등록 실패:", error);
       res.status(400).json({ error: "Invalid employee data" });
     }
   });
@@ -211,29 +240,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Employee not found" });
       }
 
-      // null 값들을 undefined로 변환하여 스키마 검증 통과
-      const cleanedBody = { ...req.body };
-      Object.keys(cleanedBody).forEach(key => {
-        if (cleanedBody[key] === null) {
-          cleanedBody[key] = undefined;
-        }
-      });
-
-      // boolean 필드들을 올바른 타입으로 변환
-      if (cleanedBody.isDepartmentHead !== undefined) {
-        cleanedBody.isDepartmentHead = cleanedBody.isDepartmentHead === 'true' || cleanedBody.isDepartmentHead === true;
-      }
-      if (cleanedBody.isActive !== undefined) {
-        cleanedBody.isActive = cleanedBody.isActive === 'true' || cleanedBody.isActive === true;
-      }
-
-      // 날짜 필드들을 Date 객체로 변환
-      if (cleanedBody.birthDate && typeof cleanedBody.birthDate === 'string') {
-        cleanedBody.birthDate = new Date(cleanedBody.birthDate);
-      }
-      if (cleanedBody.hireDate && typeof cleanedBody.hireDate === 'string') {
-        cleanedBody.hireDate = new Date(cleanedBody.hireDate);
-      }
+      // Keep explicit nulls so nullable fields can be cleared intentionally.
+      const cleanedBody = normalizeEmployeeRequestBody(req.body);
 
       const employeeData = insertEmployeeSchema.partial().parse(cleanedBody);
 
@@ -264,11 +272,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(employee);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
       console.error('❌ 직원 업데이트 실패:', error);
-      console.error('❌ 오류 스택:', error.stack);
+      console.error('❌ 오류 스택:', stack);
       console.error('❌ 오류 타입:', typeof error);
-      console.error('❌ 오류 메시지:', error.message);
-      res.status(400).json({ error: "Failed to update employee", details: error.message });
+      console.error('❌ 오류 메시지:', message);
+      res.status(400).json({ error: "Failed to update employee", details: message });
     }
   });
 

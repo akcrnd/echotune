@@ -11,7 +11,7 @@ import { Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-import { DepartmentTeamManager } from "@/lib/departments-teams";
+import { DepartmentTeamManager, type Department, type Team } from "@/lib/departments-teams";
 import { useToast } from "@/hooks/use-toast";
 import DepartmentTeamManagerModal from "./department-team-manager-modal";
 import type { Employee, InsertEmployee } from "@shared/schema";
@@ -20,9 +20,10 @@ interface EmployeeEditModalProps {
   employee: Employee | null;
   isOpen: boolean;
   onClose: () => void;
+  onSaved?: (employee: Employee) => void;
 }
 
-export default function EmployeeEditModal({ employee, isOpen, onClose }: EmployeeEditModalProps) {
+export default function EmployeeEditModal({ employee, isOpen, onClose, onSaved }: EmployeeEditModalProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [formData, setFormData] = useState<Partial<InsertEmployee>>({});
@@ -177,7 +178,13 @@ export default function EmployeeEditModal({ employee, isOpen, onClose }: Employe
       return result;
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/employees'] });
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === "string" && key.startsWith("/api/employees");
+        },
+      });
+      onSaved?.(data);
       toast({
         title: "직원 수정 완료",
         description: `${data.name}님의 정보가 성공적으로 수정되었습니다.`,
@@ -214,9 +221,8 @@ export default function EmployeeEditModal({ employee, isOpen, onClose }: Employe
       isActive: formData.isActive,
       phone: formData.phone,
       email: formData.email,
-      address: formData.address,
-      birthDate: birthDate ? birthDate.toISOString() : null, // ISO 문자열로 전송
-      hireDate: date ? date.toISOString() : null, // ISO 문자열로 전송
+      birthDate: birthDate ?? null,
+      hireDate: date ?? null,
       education: education.degree, // 문자열로 전송 (객체가 아닌)
       major: education.major,
       school: education.school,

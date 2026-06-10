@@ -2204,6 +2204,7 @@ export default function EmployeeDetail({ employeeId: propEmployeeId }: EmployeeD
         employee={employee}
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
+        onSaved={(updatedEmployee) => setEmployee(updatedEmployee)}
       />
 
       {/* Skill Edit Modal */}

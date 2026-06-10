@@ -10,7 +10,7 @@ import { Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-import { DepartmentTeamManager } from "@/lib/departments-teams";
+import { DepartmentTeamManager, type Department, type Team } from "@/lib/departments-teams";
 import { useToast } from "@/hooks/use-toast";
 import type { InsertEmployee } from "@shared/schema";
 
@@ -33,12 +33,14 @@ export default function EmployeeCreateModal({ isOpen, onClose }: EmployeeCreateM
     school: '',
     graduationYear: ''
   });
+  const [previousExperience] = useState({
+    years: 0,
+    months: 0
+  });
   const [date, setDate] = useState<Date | undefined>();
   const [birthDate, setBirthDate] = useState<Date | undefined>();
-  const [birthDateInput, setBirthDateInput] = useState<string>("");
-  const [hireDateInput, setHireDateInput] = useState<string>("");
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [teams, setTeams] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [selectedDepartment, setSelectedDepartment] = useState<string>("");
 
   // 부서/팀 데이터 로드
@@ -67,7 +69,14 @@ export default function EmployeeCreateModal({ isOpen, onClose }: EmployeeCreateM
         isActive: true,
         isDepartmentHead: false
       });
+      setEducation({
+        degree: '',
+        major: '',
+        school: '',
+        graduationYear: ''
+      });
       setDate(undefined);
+      setBirthDate(undefined);
       setSelectedDepartment("");
     }
   }, [isOpen]);
@@ -130,8 +139,8 @@ export default function EmployeeCreateModal({ isOpen, onClose }: EmployeeCreateM
       team: formData.team || null,
       email: formData.email || null,
       phone: formData.phone || null,
-      hireDate: date ? date.toISOString() : null, // ISO 문자열로 전송
-      birthDate: birthDate ? birthDate.toISOString() : null, // ISO 문자열로 전송
+      hireDate: date ?? null,
+      birthDate: birthDate ?? null,
       managerId: formData.managerId || null,
       photoUrl: formData.photoUrl || null,
       education: education.degree, // 문자열로 전송 (객체가 아닌)

@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Search, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import D3OrgChart from "@/components/orgchart/d3-org-chart";
 import EmployeePanel from "@/components/orgchart/employee-panel";
@@ -13,10 +11,8 @@ export default function OrgChart() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [, setLocation] = useLocation();
-
-  const { data: employees, isLoading } = useQuery<Employee[]>({
-    queryKey: ['/api/employees']
+  const { data: employees = [], isLoading, error, refetch } = useQuery<Employee[]>({
+    queryKey: ["/api/employees"]
   });
 
   // 비활성 직원 필터링
@@ -60,6 +56,22 @@ export default function OrgChart() {
           </div>
           <h3 className="text-lg font-medium mb-2">조직도 로딩 중...</h3>
           <p className="text-sm text-muted-foreground">직원 데이터를 불러오고 있습니다.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="max-w-md text-center">
+          <h3 className="text-lg font-medium mb-2">조직도 데이터를 불러오지 못했습니다</h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            직원 API 응답을 확인한 뒤 다시 시도해 주세요.
+          </p>
+          <Button onClick={() => refetch()} data-testid="button-retry-orgchart">
+            다시 불러오기
+          </Button>
         </div>
       </div>
     );

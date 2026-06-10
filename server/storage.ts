@@ -95,6 +95,18 @@ function toInteger(value: unknown): number | null {
   return parsed === null ? null : Math.trunc(parsed);
 }
 
+function toOptionalDate(value: unknown): Date | null | undefined {
+  return value === undefined ? undefined : toDate(value);
+}
+
+function toOptionalNumber(value: unknown): number | null | undefined {
+  return value === undefined ? undefined : toNumber(value);
+}
+
+function toOptionalInteger(value: unknown): number | null | undefined {
+  return value === undefined ? undefined : toInteger(value);
+}
+
 function ensureArray(value: unknown): any[] {
   if (Array.isArray(value)) return value;
   if (typeof value === "string") {
@@ -122,9 +134,8 @@ function serializeJson(value: unknown): JsonValue {
   return value as JsonValue;
 }
 
-function rowTimestamp(row: Record<string, any>, key: string): Date | undefined {
-  const parsed = toDate(row[key]);
-  return parsed ?? undefined;
+function rowTimestamp(row: Record<string, any>, key: string): Date | null {
+  return toDate(row[key]);
 }
 
 async function upsertSetting(key: string, value: JsonValue): Promise<void> {
@@ -635,16 +646,16 @@ export class PostgresStorage implements IStorage {
       team: employee.team,
       email: employee.email,
       phone: employee.phone,
-      hire_date: toDate((employee as any).hireDate),
-      birth_date: toDate((employee as any).birthDate),
+      hire_date: toOptionalDate((employee as any).hireDate),
+      birth_date: toOptionalDate((employee as any).birthDate),
       manager_id: employee.managerId,
       photo_url: employee.photoUrl,
       education: (employee as any).education,
       major: (employee as any).major,
       school: (employee as any).school,
-      graduation_year: toInteger((employee as any).graduationYear),
-      previous_experience_years: toInteger((employee as any).previousExperienceYears),
-      previous_experience_months: toInteger((employee as any).previousExperienceMonths),
+      graduation_year: toOptionalInteger((employee as any).graduationYear),
+      previous_experience_years: toOptionalInteger((employee as any).previousExperienceYears),
+      previous_experience_months: toOptionalInteger((employee as any).previousExperienceMonths),
       is_department_head: (employee as any).isDepartmentHead,
       is_active: employee.isActive,
     });
@@ -725,10 +736,10 @@ export class PostgresStorage implements IStorage {
       provider: training.provider,
       type: training.type,
       category: training.category,
-      start_date: toDate((training as any).startDate),
-      completion_date: toDate((training as any).completionDate),
-      duration: toInteger(training.duration),
-      score: toNumber(training.score),
+      start_date: toOptionalDate((training as any).startDate),
+      completion_date: toOptionalDate((training as any).completionDate),
+      duration: toOptionalInteger(training.duration),
+      score: toOptionalNumber(training.score),
       status: training.status,
       instructor_role: (training as any).instructorRole,
       certificate_url: training.certificateUrl,
@@ -802,14 +813,14 @@ export class PostgresStorage implements IStorage {
       employee_id: certification.employeeId,
       name: certification.name,
       issuer: certification.issuer,
-      issue_date: toDate((certification as any).issueDate),
-      expiry_date: toDate((certification as any).expiryDate),
+      issue_date: toOptionalDate((certification as any).issueDate),
+      expiry_date: toOptionalDate((certification as any).expiryDate),
       credential_id: certification.credentialId,
       verification_url: certification.verificationUrl,
       category: certification.category,
       level: certification.level,
-      score: toNumber(certification.score),
-      score_at_acquisition: toNumber((certification as any).scoreAtAcquisition),
+      score: toOptionalNumber(certification.score),
+      score_at_acquisition: toOptionalNumber((certification as any).scoreAtAcquisition),
       scoring_criteria_version: (certification as any).scoringCriteriaVersion,
       use_fixed_score: (certification as any).useFixedScore,
       is_active: certification.isActive,
@@ -890,9 +901,9 @@ export class PostgresStorage implements IStorage {
       proficiency_level: language.proficiencyLevel,
       test_type: language.testType,
       test_level: language.testLevel,
-      score: toInteger(language.score),
-      max_score: toInteger(language.maxScore),
-      test_date: toDate((language as any).testDate),
+      score: toOptionalInteger(language.score),
+      max_score: toOptionalInteger(language.maxScore),
+      test_date: toOptionalDate((language as any).testDate),
       certificate_url: language.certificateUrl,
       is_active: language.isActive,
     });
@@ -965,9 +976,9 @@ export class PostgresStorage implements IStorage {
       employee_id: skill.employeeId,
       skill_type: skill.skillType,
       skill_name: skill.skillName,
-      proficiency_level: toInteger(skill.proficiencyLevel),
-      years_of_experience: toNumber(skill.yearsOfExperience),
-      last_assessed_date: toDate((skill as any).lastAssessedDate),
+      proficiency_level: toOptionalInteger(skill.proficiencyLevel),
+      years_of_experience: toOptionalNumber(skill.yearsOfExperience),
+      last_assessed_date: toOptionalDate((skill as any).lastAssessedDate),
       assessed_by: skill.assessedBy,
       notes: skill.notes,
       is_active: skill.isActive,
@@ -1046,13 +1057,13 @@ export class PostgresStorage implements IStorage {
     await databaseReady;
     const payload = stripUndefined({
       employee_id: calculation.employeeId,
-      experience_score: toNumber(calculation.experienceScore),
-      certification_score: toNumber(calculation.certificationScore),
-      language_score: toNumber(calculation.languageScore),
-      training_score: toNumber(calculation.trainingScore),
-      technical_score: toNumber(calculation.technicalScore),
-      soft_skill_score: toNumber(calculation.softSkillScore),
-      overall_score: toNumber(calculation.overallScore),
+      experience_score: toOptionalNumber(calculation.experienceScore),
+      certification_score: toOptionalNumber(calculation.certificationScore),
+      language_score: toOptionalNumber(calculation.languageScore),
+      training_score: toOptionalNumber(calculation.trainingScore),
+      technical_score: toOptionalNumber(calculation.technicalScore),
+      soft_skill_score: toOptionalNumber(calculation.softSkillScore),
+      overall_score: toOptionalNumber(calculation.overallScore),
       calculated_by: calculation.calculatedBy,
     });
     const entries = Object.entries(payload);
@@ -1126,8 +1137,8 @@ export class PostgresStorage implements IStorage {
       application_number: patent.applicationNumber,
       patent_number: patent.patentNumber,
       status: patent.status,
-      application_date: toDate(patent.applicationDate),
-      registration_date: toDate((patent as any).registrationDate ?? (patent as any).grantDate),
+      application_date: toOptionalDate(patent.applicationDate),
+      registration_date: toOptionalDate((patent as any).registrationDate ?? (patent as any).grantDate),
       inventors: (patent as any).inventors ? JSON.stringify(ensureArray((patent as any).inventors)) : undefined,
       description: patent.description,
       category: patent.category,
@@ -1200,9 +1211,9 @@ export class PostgresStorage implements IStorage {
       title: publication.title,
       authors: (publication as any).authors ? JSON.stringify(ensureArray((publication as any).authors)) : undefined,
       journal: (publication as any).journal,
-      publication_date: toDate((publication as any).publicationDate),
+      publication_date: toOptionalDate((publication as any).publicationDate),
       doi: (publication as any).doi,
-      impact_factor: toNumber((publication as any).impactFactor),
+      impact_factor: toOptionalNumber((publication as any).impactFactor),
       category: (publication as any).category ?? (publication as any).publicationType,
       level: (publication as any).level ?? (publication as any).status,
       description: (publication as any).description ?? (publication as any).abstract,
@@ -1277,10 +1288,10 @@ export class PostgresStorage implements IStorage {
       awarding_organization: (award as any).awardingOrganization,
       category: award.category,
       level: award.level,
-      award_date: toDate((award as any).awardDate),
+      award_date: toOptionalDate((award as any).awardDate),
       description: award.description,
       certificate_url: award.certificateUrl,
-      monetary_value: toNumber((award as any).monetaryValue),
+      monetary_value: toOptionalNumber((award as any).monetaryValue),
       is_team_award: (award as any).isTeamAward,
       team_members: (award as any).teamMembers ? JSON.stringify(ensureArray((award as any).teamMembers)) : undefined,
     });
@@ -1351,13 +1362,13 @@ export class PostgresStorage implements IStorage {
       employee_id: project.employeeId,
       project_name: project.projectName,
       role: project.role,
-      start_date: toDate(project.startDate),
-      end_date: toDate(project.endDate),
+      start_date: toOptionalDate(project.startDate),
+      end_date: toOptionalDate(project.endDate),
       status: project.status,
       description: project.description,
       technologies: project.technologies,
-      team_size: toInteger(project.teamSize),
-      budget: toNumber(project.budget),
+      team_size: toOptionalInteger(project.teamSize),
+      budget: toOptionalNumber(project.budget),
       client: project.client,
       is_internal: project.isInternal,
       notes: (project as any).notes,
@@ -1406,10 +1417,10 @@ export class PostgresStorage implements IStorage {
   async updateTrainingHours(id: string, trainingHours: Partial<InsertTrainingHours>): Promise<TrainingHours> {
     await databaseReady;
     const payload = stripUndefined({
-      year: toInteger(trainingHours.year),
+      year: toOptionalInteger(trainingHours.year),
       team: trainingHours.team,
       training_type: trainingHours.trainingType,
-      hours: toNumber(trainingHours.hours),
+      hours: toOptionalNumber(trainingHours.hours),
       description: trainingHours.description,
     });
     const entries = Object.entries(payload);
@@ -1456,9 +1467,9 @@ export class PostgresStorage implements IStorage {
   async updateTeamEmployees(id: string, teamEmployees: Partial<InsertTeamEmployees>): Promise<TeamEmployees> {
     await databaseReady;
     const payload = stripUndefined({
-      year: toInteger(teamEmployees.year),
+      year: toOptionalInteger(teamEmployees.year),
       team: teamEmployees.team,
-      employee_count: toInteger(teamEmployees.employeeCount),
+      employee_count: toOptionalInteger(teamEmployees.employeeCount),
       description: teamEmployees.description,
     });
     const entries = Object.entries(payload);
@@ -1520,7 +1531,7 @@ export class PostgresStorage implements IStorage {
       department_name: department.name,
       description: department.description,
       manager_id: department.managerId,
-      budget: toNumber(department.budget),
+      budget: toOptionalNumber(department.budget),
       location: department.location,
       is_active: department.isActive,
     });
@@ -1588,7 +1599,7 @@ export class PostgresStorage implements IStorage {
       department_id: departmentId,
       description: team.description,
       team_lead_id: team.teamLeadId,
-      budget: toNumber(team.budget),
+      budget: toOptionalNumber(team.budget),
       location: team.location,
       is_active: team.isActive,
     });

@@ -2,6 +2,10 @@ import { Pool, types } from "pg";
 
 const TIMESTAMP_OIDS = [1114, 1184];
 const DATE_OIDS = [1082];
+const DEFAULT_CONNECTION_TIMEOUT_MS = 5000;
+const DEFAULT_QUERY_TIMEOUT_MS = 15000;
+const DEFAULT_POOL_IDLE_TIMEOUT_MS = 30000;
+const DEFAULT_POOL_MAX = 10;
 
 for (const oid of TIMESTAMP_OIDS) {
   types.setTypeParser(oid, (value) => new Date(value));
@@ -19,8 +23,31 @@ function requireDatabaseUrl(): string {
   return value;
 }
 
+function positiveIntegerEnv(name: string, fallback: number): number {
+  const value = process.env[name];
+  if (!value) return fallback;
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function databaseErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 export const pool = new Pool({
   connectionString: requireDatabaseUrl(),
+  application_name: process.env.PGAPPNAME ?? "echotune-api",
+  connectionTimeoutMillis: positiveIntegerEnv("DB_CONNECTION_TIMEOUT_MS", DEFAULT_CONNECTION_TIMEOUT_MS),
+  idleTimeoutMillis: positiveIntegerEnv("DB_POOL_IDLE_TIMEOUT_MS", DEFAULT_POOL_IDLE_TIMEOUT_MS),
+  max: positiveIntegerEnv("DB_POOL_MAX", DEFAULT_POOL_MAX),
+  query_timeout: positiveIntegerEnv("DB_QUERY_TIMEOUT_MS", DEFAULT_QUERY_TIMEOUT_MS),
+  statement_timeout: positiveIntegerEnv("DB_STATEMENT_TIMEOUT_MS", DEFAULT_QUERY_TIMEOUT_MS),
+});
+
+pool.on("error", (error) => {
+  console.error("[db] idle client error:", databaseErrorMessage(error));
 });
 
 const schemaSql = `
@@ -351,7 +378,13 @@ let schemaReadyPromise: Promise<void> | null = null;
 export function ensureDatabaseSchema(): Promise<void> {
   if (!schemaReadyPromise) {
     schemaReadyPromise = (async () => {
-      await pool.query(schemaSql);
+      try {
+        await pool.query(schemaSql);
+      } catch (error) {
+        schemaReadyPromise = null;
+        console.error("[db] schema bootstrap failed:", databaseErrorMessage(error));
+        throw error;
+      }
     })();
   }
 
@@ -367,7 +400,8 @@ export async function checkDatabaseHealth(): Promise<boolean> {
   try {
     await assertDatabaseReady();
     return true;
-  } catch {
+  } catch (error) {
+    console.error("[db] health check failed:", databaseErrorMessage(error));
     return false;
   }
 }

@@ -235,6 +235,28 @@ function serializeScoreNotes(applicable: boolean, notes?: string | null) {
   return JSON.stringify({ applicable, note: parsed.note || undefined });
 }
 
+function requirementGroupForMember(member?: TeamMember | null) {
+  const position = member?.position ?? "";
+  if (position.includes("그룹장") || position.includes("팀장")) {
+    return { key: "leader" as const, label: "팀장·그룹장" };
+  }
+  if (position.includes("책임")) {
+    return { key: "senior" as const, label: "책임 이상" };
+  }
+  return { key: "staff" as const, label: "책임 미만" };
+}
+
+function requirementLevelForMember(requirement: Requirement, member?: TeamMember | null) {
+  const group = requirementGroupForMember(member);
+  const groupValue =
+    group.key === "leader"
+      ? requirement.deptHeadLevel
+      : group.key === "senior"
+        ? requirement.managerLevel
+        : requirement.staffLevel;
+  return levelNumber(groupValue) === null ? requirement.minimumLevel : groupValue;
+}
+
 function TextCell({
   value,
   onChange,
@@ -831,7 +853,7 @@ export default function TeamCompetency() {
         selectedScores: [] as number[],
       };
     }
-    const requiredLevels = detail.requirements.map((requirement) => levelNumber(requirement.minimumLevel));
+    const requiredLevels = detail.requirements.map((requirement) => levelNumber(requirementLevelForMember(requirement, selectedMember)));
     const selectedScores = selectedMember
       ? detail.requirements.map((requirement) => scoreNumberFor(requirement, selectedMember.id))
       : [];
@@ -1232,7 +1254,7 @@ export default function TeamCompetency() {
                 <div className="rounded-lg border bg-white p-4">
                   <div className="text-xs font-medium text-muted-foreground">평균 요구 수준</div>
                   <div className="mt-2 text-2xl font-bold">{formatAverage(competencyStats.requiredAverage)} / 5</div>
-                  <div className="mt-1 text-xs text-muted-foreground">필수 수준 평균</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{requirementGroupForMember(selectedMember).label} 기준</div>
                 </div>
                 <div className="rounded-lg border bg-white p-4">
                   <div className="text-xs font-medium text-muted-foreground">현재 평균 수준</div>
@@ -1288,8 +1310,9 @@ export default function TeamCompetency() {
                       <TableRow className="bg-slate-50">
                         <TableHead className="min-w-[260px]">대분류</TableHead>
                         <TableHead className="min-w-[240px]">세부 업무</TableHead>
-                        <TableHead className="min-w-[260px]">주요 업무 기능</TableHead>
-                        <TableHead className="min-w-[120px] text-center">필수 수준</TableHead>
+                        <TableHead className="min-w-[190px]">최소 실무지식/경력</TableHead>
+                        <TableHead className="min-w-[150px]">숙달 소요기간</TableHead>
+                        <TableHead className="min-w-[150px] text-center">요구 수준</TableHead>
                         <TableHead className="min-w-[120px] text-center">팀 평균</TableHead>
                         <TableHead className="min-w-[96px] text-center">해당</TableHead>
                         <TableHead className="min-w-[150px] text-center">선택 인원</TableHead>
@@ -1303,7 +1326,9 @@ export default function TeamCompetency() {
                         group.rows.map(({ row, index }, rowIndex) => {
                           const categoryIndex = group.workCategoryIndex;
                           const category = group.workCategory;
-                          const requiredLevel = levelNumber(row.minimumLevel);
+                          const selectedRequirementGroup = requirementGroupForMember(selectedMember);
+                          const selectedRequirementValue = requirementLevelForMember(row, selectedMember);
+                          const requiredLevel = levelNumber(selectedRequirementValue);
                           const teamAverage = average(detail.teamMembers.map((member) => scoreNumberFor(row, member.id)));
                           const selectedApplicable = selectedMember ? scoreApplicableFor(row, selectedMember.id) : true;
                           const selectedScore = selectedMember && selectedApplicable ? scoreNumberFor(row, selectedMember.id) : null;
@@ -1311,7 +1336,6 @@ export default function TeamCompetency() {
                           const need = selectedApplicable
                             ? needSummary(gap)
                             : { label: "비해당", className: "border-slate-200 bg-slate-50 text-slate-600" };
-                          const majorFunction = numberedLine(category?.majorFunctions, row.subNo) || row.subName || "";
                           const toolHint = numberedLine(category?.controlItems, row.subNo);
 
                           return (
@@ -1433,19 +1457,83 @@ export default function TeamCompetency() {
                                 </div>
                               </TableCell>
                               <TableCell className="align-top">
-                                <Textarea
-                                  value={majorFunction}
-                                  readOnly
-                                  placeholder="주요 업무 기능"
-                                  className="min-h-[64px] min-w-[240px] resize-y bg-slate-50"
+                                <TextAreaCell
+                                  value={row.minKnowledge}
+                                  onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minKnowledge: value })}
+                                  placeholder="최소 실무지식 / 경력 기간"
+                                  className="min-w-[170px]"
+                                />
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <TextCell
+                                  value={row.proficiencyPeriod}
+                                  onChange={(value) => updateArrayRow<Requirement>("requirements", index, { proficiencyPeriod: value })}
+                                  placeholder="예: 12개월"
+                                  className="min-w-[130px]"
                                 />
                               </TableCell>
                               <TableCell className="text-center align-top">
                                 <div className="space-y-2">
-                                  <TextCell value={row.minimumLevel} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minimumLevel: value })} placeholder="Lv" className="mx-auto w-20 text-center" />
                                   <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${levelBadgeClass(requiredLevel)}`}>
-                                    {formatLevel(row.minimumLevel)}
+                                    {formatLevel(selectedRequirementValue)}
                                   </span>
+                                  <div className="text-[11px] text-muted-foreground">{selectedRequirementGroup.label}</div>
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button variant="outline" size="sm">
+                                        <Pencil className="mr-2 h-4 w-4" />
+                                        기준 설정
+                                      </Button>
+                                    </DialogTrigger>
+                                    <DialogContent>
+                                      <DialogHeader>
+                                        <DialogTitle>팀원별 요구수준 설정</DialogTitle>
+                                        <DialogDescription>{row.subName || "세부업무"} 직급 그룹별 요구수준</DialogDescription>
+                                      </DialogHeader>
+                                      <div className="grid gap-3">
+                                        <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+                                          <label className="text-sm font-medium">책임 미만</label>
+                                          <TextCell
+                                            value={row.staffLevel}
+                                            onChange={(value) => updateArrayRow<Requirement>("requirements", index, { staffLevel: value })}
+                                            placeholder="Lv 또는 N/A"
+                                            disabled={isReportLocked}
+                                            className="w-full"
+                                          />
+                                        </div>
+                                        <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+                                          <label className="text-sm font-medium">책임 이상</label>
+                                          <TextCell
+                                            value={row.managerLevel}
+                                            onChange={(value) => updateArrayRow<Requirement>("requirements", index, { managerLevel: value })}
+                                            placeholder="Lv 또는 N/A"
+                                            disabled={isReportLocked}
+                                            className="w-full"
+                                          />
+                                        </div>
+                                        <div className="grid grid-cols-[120px_1fr] items-center gap-3">
+                                          <label className="text-sm font-medium">팀장·그룹장</label>
+                                          <TextCell
+                                            value={row.deptHeadLevel}
+                                            onChange={(value) => updateArrayRow<Requirement>("requirements", index, { deptHeadLevel: value })}
+                                            placeholder="Lv 또는 N/A"
+                                            disabled={isReportLocked}
+                                            className="w-full"
+                                          />
+                                        </div>
+                                        <div className="grid grid-cols-[120px_1fr] items-center gap-3 rounded-md bg-yellow-50 p-2">
+                                          <label className="text-sm font-medium">최소 수준</label>
+                                          <TextCell
+                                            value={row.minimumLevel}
+                                            onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minimumLevel: value })}
+                                            placeholder="Lv"
+                                            disabled={isReportLocked}
+                                            className="w-full"
+                                          />
+                                        </div>
+                                      </div>
+                                    </DialogContent>
+                                  </Dialog>
                                 </div>
                               </TableCell>
                               <TableCell className="text-center align-top">
@@ -1503,10 +1591,7 @@ export default function TeamCompetency() {
                                     className="min-w-[240px]"
                                   />
                                   {toolHint && <div className="rounded-md bg-slate-50 px-2 py-1 text-xs text-muted-foreground">{toolHint}</div>}
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <TextCell value={row.proficiencyPeriod} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { proficiencyPeriod: value })} placeholder="숙달기간" className="min-w-[110px]" />
-                                    <TextCell value={row.languageRequirement} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { languageRequirement: value })} placeholder="언어/수준" className="min-w-[110px]" />
-                                  </div>
+                                  <TextCell value={row.languageRequirement} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { languageRequirement: value })} placeholder="언어/수준" className="min-w-[140px]" />
                                 </div>
                               </TableCell>
                             </TableRow>

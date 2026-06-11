@@ -66,6 +66,7 @@ After field review, the module must not behave like a blank workbook editor.
 - Score saves are roster-governed: the API ignores non-team score rows, writes employee names from the employee table, and rejects scores outside the 0-5 range.
 - In the merged work/requirement matrix, category descriptions are viewed by hover and edited through a category dialog; sub-work rows are added within their category context.
 - Employee-specific sub-work applicability is stored with the score row metadata, so non-applicable rows are excluded from missing-score and GAP calculations.
+- The merged matrix hides core-function text as a main column and instead shows minimum practical knowledge/experience plus proficiency period. Role-level requirements are edited in a per-row dialog using `책임 미만`, `책임 이상`, `팀장·그룹장`, and `최소 수준`.
 - Qualification tabs show evidence gaps when certification, skill, language, and training records are not yet registered.
 - Organization order follows the org chart hierarchy: `manager_id` builds the parent-child tree first, then siblings under the same manager follow org chart order/name fallback. Manual row ordering belongs in the org chart/personnel domain, not this report.
 

@@ -16,11 +16,10 @@ The reference file `시험시작팀.xls` contains these relevant sheets:
 
 ## Recommended Product Shape
 
-Add a new `팀 적격성 관리` menu. The page is organized by team and year, then shows four operational tabs:
+Add a new `팀 적격성 관리` menu. The page is organized by team and year, then shows three operational tabs:
 
 - `조직 및 업무분장`: team-only org chart cards, employee identity from the org chart, report-specific role title, detailed responsibility, and deputy. Job description data can remain in storage but is hidden from the default card view until needed.
-- `업무분류`: major category, core functions, control items, related docs, cooperating team/work.
-- `요구기준 및 평가`: requirement rows with major/sub work, education, major, certification, experience, training, language, role-level standards, minimum level, and per-member scores.
+- `업무/요구기준 평가`: merged operating matrix with work categories, sub-work rows, core function, required level, team average, selected employee score, GAP, development need, and related training/tool in one view. Work category and requirement rows remain editable from the same matrix.
 - `요구자격 및 보유자`: required qualification, grade, holders, held qualification, plan, remarks.
 
 ## Data Model

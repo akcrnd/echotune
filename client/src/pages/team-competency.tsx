@@ -168,6 +168,44 @@ function percentValue(done: number, total: number) {
   return Math.round((done / total) * 100);
 }
 
+function levelNumber(value?: string | number | null) {
+  const match = String(value ?? "").match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatLevel(value?: string | number | null) {
+  const parsed = levelNumber(value);
+  if (parsed === null) return "-";
+  return `Lv.${Number.isInteger(parsed) ? parsed : parsed.toFixed(1)}`;
+}
+
+function average(values: Array<number | null>) {
+  const numericValues = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  if (numericValues.length === 0) return null;
+  return numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
+}
+
+function formatAverage(value: number | null) {
+  return value === null ? "-" : value.toFixed(1);
+}
+
+function normalizeKey(value?: string | number | null) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function numberedLine(value?: string | null, no?: string | null) {
+  const lines = String(value ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return "";
+  const normalizedNo = String(no ?? "").trim();
+  const matched = lines.find((line) => normalizedNo && new RegExp(`^${normalizedNo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[.)]\\s*`).test(line));
+  return matched ?? lines[0] ?? "";
+}
+
 function TextCell({
   value,
   onChange,
@@ -222,18 +260,30 @@ export default function TeamCompetency() {
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [detail, setDetail] = useState<TeamCompetencyDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [selectedMemberId, setSelectedMemberId] = useState("");
 
   const { data: teams = [], isLoading: isLoadingTeams } = useQuery<Team[]>({
     queryKey: ["/api/teams"],
   });
 
   const selectedTeam = teams.find((team) => team.code === selectedTeamCode);
+  const selectedMember = detail?.teamMembers.find((member) => member.id === selectedMemberId) ?? detail?.teamMembers[0];
 
   useEffect(() => {
     if (!selectedTeamCode && teams.length > 0) {
       setSelectedTeamCode(teams[0].code);
     }
   }, [selectedTeamCode, teams]);
+
+  useEffect(() => {
+    if (!detail?.teamMembers.length) {
+      setSelectedMemberId("");
+      return;
+    }
+    if (!detail.teamMembers.some((member) => member.id === selectedMemberId)) {
+      setSelectedMemberId(detail.teamMembers[0].id);
+    }
+  }, [detail, selectedMemberId]);
 
   useEffect(() => {
     if (!selectedTeamCode) return;
@@ -591,6 +641,130 @@ export default function TeamCompetency() {
   const scoreFor = (requirement: Requirement, memberId: string) =>
     requirement.scores?.find((score) => score.employeeId === memberId)?.score ?? "";
 
+  const scoreNumberFor = (requirement: Requirement, memberId?: string | null) => {
+    if (!memberId) return null;
+    return levelNumber(scoreFor(requirement, memberId));
+  };
+
+  const workCategoryLookup = useMemo(() => {
+    const byNo = new Map<string, { row: WorkCategory; index: number }>();
+    const byName = new Map<string, { row: WorkCategory; index: number }>();
+    const rows = detail?.workCategories ?? [];
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (hasText(row.categoryNo)) byNo.set(normalizeKey(row.categoryNo), { row, index });
+      if (hasText(row.categoryName)) byName.set(normalizeKey(row.categoryName), { row, index });
+    }
+    return { byNo, byName };
+  }, [detail]);
+
+  const getWorkCategoryForRequirement = (requirement: Requirement) =>
+    workCategoryLookup.byNo.get(normalizeKey(requirement.majorNo)) ??
+    workCategoryLookup.byName.get(normalizeKey(requirement.majorName));
+
+  const requirementRows = useMemo(() => {
+    if (!detail) return [];
+    return detail.requirements
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => (a.row.displayOrder ?? a.index) - (b.row.displayOrder ?? b.index));
+  }, [detail]);
+
+  const competencyGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        key: string;
+        majorNo?: string | null;
+        majorName?: string | null;
+        workCategory?: WorkCategory;
+        workCategoryIndex?: number;
+        rows: Array<{ row: Requirement; index: number }>;
+      }
+    >();
+
+    for (const item of requirementRows) {
+      const matchedCategory = getWorkCategoryForRequirement(item.row);
+      const key = normalizeKey(matchedCategory?.row.categoryNo ?? item.row.majorNo ?? item.row.majorName ?? item.index);
+      const group = groups.get(key) ?? {
+        key,
+        majorNo: matchedCategory?.row.categoryNo ?? item.row.majorNo,
+        majorName: matchedCategory?.row.categoryName ?? item.row.majorName,
+        workCategory: matchedCategory?.row,
+        workCategoryIndex: matchedCategory?.index,
+        rows: [],
+      };
+      group.rows.push(item);
+      groups.set(key, group);
+    }
+
+    return Array.from(groups.values());
+  }, [requirementRows, workCategoryLookup]);
+
+  const competencyStats = useMemo(() => {
+    if (!detail) {
+      return {
+        requiredAverage: null,
+        selectedAverage: null,
+        teamAverage: null,
+        averageGap: null,
+        selectedScores: [] as number[],
+      };
+    }
+    const requiredLevels = detail.requirements.map((requirement) => levelNumber(requirement.minimumLevel));
+    const selectedScores = selectedMember
+      ? detail.requirements.map((requirement) => scoreNumberFor(requirement, selectedMember.id))
+      : [];
+    const teamScores = detail.requirements.flatMap((requirement) =>
+      detail.teamMembers.map((member) => scoreNumberFor(requirement, member.id)),
+    );
+    const requiredAverage = average(requiredLevels);
+    const selectedAverage = average(selectedScores);
+    const teamAverage = average(teamScores);
+    const averageGap = requiredAverage !== null && selectedAverage !== null ? selectedAverage - requiredAverage : null;
+
+    return {
+      requiredAverage,
+      selectedAverage,
+      teamAverage,
+      averageGap,
+      selectedScores: selectedScores.filter((value): value is number => value !== null),
+    };
+  }, [detail, selectedMember]);
+
+  const selectedLevelDistribution = useMemo(() => {
+    const buckets = [1, 2, 3, 4, 5].map((level) => ({ level, count: 0 }));
+    for (const score of competencyStats.selectedScores) {
+      const bucket = buckets[Math.min(Math.max(Math.round(score), 1), 5) - 1];
+      bucket.count += 1;
+    }
+    return buckets;
+  }, [competencyStats.selectedScores]);
+
+  const selectedLevelTotal = selectedLevelDistribution.reduce((sum, bucket) => sum + bucket.count, 0);
+
+  const levelBadgeClass = (value: number | null, required?: number | null) => {
+    if (value === null) return "border-slate-200 bg-slate-50 text-slate-500";
+    if (required !== undefined && required !== null) {
+      if (value < required) return "border-red-200 bg-red-50 text-red-700";
+      if (value > required) return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    }
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  };
+
+  const gapLabel = (gap: number | null) => {
+    if (gap === null) return "-";
+    if (gap > 0) return `+${gap.toFixed(1)}`;
+    return gap.toFixed(1);
+  };
+
+  const needSummary = (gap: number | null) => {
+    if (gap === null) return { label: "미평가", className: "border-slate-200 bg-slate-50 text-slate-600" };
+    if (gap <= -2) return { label: "매우 높음", className: "border-red-200 bg-red-50 text-red-700" };
+    if (gap < 0) return { label: "높음", className: "border-rose-200 bg-rose-50 text-rose-700" };
+    if (gap === 0) return { label: "보통", className: "border-amber-200 bg-amber-50 text-amber-700" };
+    return { label: "양호", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
+  };
+
   const isReportLocked = detail?.report.status === "approved";
 
   const renderOrgAssignmentCard = (row: AssignmentRow) => {
@@ -863,10 +1037,9 @@ export default function TeamCompetency() {
           </div>
 
           <Tabs defaultValue="organization" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="organization">조직 및 업무분장</TabsTrigger>
-              <TabsTrigger value="work">업무분류표</TabsTrigger>
-              <TabsTrigger value="requirements">요구기준 및 평가</TabsTrigger>
+              <TabsTrigger value="competency">업무/요구기준 평가</TabsTrigger>
               <TabsTrigger value="qualifications">요구자격 보유현황</TabsTrigger>
             </TabsList>
 
@@ -889,169 +1062,267 @@ export default function TeamCompetency() {
               </fieldset>
             </TabsContent>
 
-            <TabsContent value="work" className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">업무분류 {detail.workCategories.length}개</Badge>
-                  <Badge variant={operationalStats?.templateReady ? "secondary" : "destructive"}>엑셀 기준 템플릿</Badge>
-                </div>
-                <Button variant="outline" size="sm" onClick={addWorkCategory} disabled={isReportLocked}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  업무 추가
-                </Button>
-              </div>
-              <fieldset disabled={isReportLocked} className="contents">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>No</TableHead>
-                    <TableHead>대분류</TableHead>
-                    <TableHead>주요 업무 기능</TableHead>
-                    <TableHead>중점관리 항목</TableHead>
-                    <TableHead>관련 문서/법규</TableHead>
-                    <TableHead>협조팀/업무</TableHead>
-                    <TableHead className="w-[60px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {detail.workCategories.map((row, index) => (
-                    <TableRow key={row.id ?? index}>
-                      <TableCell>
-                        <TextCell value={row.categoryNo} onChange={(value) => updateArrayRow<WorkCategory>("workCategories", index, { categoryNo: value })} className="w-20" />
-                      </TableCell>
-                      <TableCell>
-                        <TextCell value={row.categoryName} onChange={(value) => updateArrayRow<WorkCategory>("workCategories", index, { categoryName: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <TextAreaCell value={row.majorFunctions} onChange={(value) => updateArrayRow<WorkCategory>("workCategories", index, { majorFunctions: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <TextAreaCell value={row.controlItems} onChange={(value) => updateArrayRow<WorkCategory>("workCategories", index, { controlItems: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <TextAreaCell value={row.relatedDocs} onChange={(value) => updateArrayRow<WorkCategory>("workCategories", index, { relatedDocs: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-2">
-                          <TextCell value={row.cooperatingTeam} onChange={(value) => updateArrayRow<WorkCategory>("workCategories", index, { cooperatingTeam: value })} placeholder="협조팀" />
-                          <TextCell value={row.cooperatingWork} onChange={(value) => updateArrayRow<WorkCategory>("workCategories", index, { cooperatingWork: value })} placeholder="업무명" />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("workCategories", index)} disabled={isReportLocked}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              </fieldset>
-            </TabsContent>
-
-            <TabsContent value="requirements" className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-[260px] flex-1 items-center gap-3">
+            <TabsContent value="competency" className="space-y-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">업무 영역 {detail.workCategories.length}개</Badge>
+                  <Badge variant="outline">세부 업무 {detail.requirements.length}개</Badge>
                   <Badge variant="outline">평가 {scoreStats.entered}/{scoreStats.total}</Badge>
-                  <Progress value={percentValue(scoreStats.entered, scoreStats.total)} className="h-2 max-w-sm" />
                   {operationalStats && operationalStats.missingScores > 0 && (
                     <Badge variant="secondary">미평가 {operationalStats.missingScores}칸</Badge>
                   )}
                 </div>
-                <Button variant="outline" size="sm" onClick={addRequirement} disabled={isReportLocked}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  기준 추가
-                </Button>
-              </div>
-              <fieldset disabled={isReportLocked} className="contents">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>대분류</TableHead>
-                    <TableHead>중분류</TableHead>
-                    <TableHead>요구조건</TableHead>
-                    <TableHead>직급별 기준</TableHead>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-sm font-medium">팀원 선택</label>
+                  <select
+                    value={selectedMember?.id ?? ""}
+                    onChange={(event) => setSelectedMemberId(event.target.value)}
+                    className="h-10 min-w-[180px] rounded-md border border-input bg-background px-3 text-sm"
+                    data-testid="select-team-competency-member"
+                  >
                     {detail.teamMembers.map((member) => (
-                      <TableHead key={member.id} className="min-w-[96px] text-center">
-                        <div className="space-y-1">
-                          <div>{member.name}</div>
-                          <div className="text-[11px] font-normal text-muted-foreground">
-                            증빙 {evidenceTotalForMember(member.id)}건
-                          </div>
-                        </div>
-                      </TableHead>
+                      <option key={member.id} value={member.id}>
+                        {member.name} {member.position}
+                      </option>
                     ))}
-                    <TableHead className="w-[60px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {detail.requirements.map((row, index) => {
-                    const enteredForRow = detail.teamMembers.filter((member) => hasText(scoreFor(row, member.id))).length;
-                    return (
-                    <TableRow key={row.id ?? index}>
-                      <TableCell>
-                        <div className="space-y-2">
-                          <TextCell value={row.majorNo} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { majorNo: value })} placeholder="No" className="w-20" />
-                          <TextCell value={row.majorName} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { majorName: value })} placeholder="대분류" />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-2">
-                          <TextCell value={row.subNo} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subNo: value })} placeholder="No" className="w-20" />
-                          <TextCell value={row.subName} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subName: value })} placeholder="업무명" />
-                          <Badge variant={enteredForRow === detail.teamMembers.length ? "secondary" : "outline"}>
-                            입력 {enteredForRow}/{detail.teamMembers.length}
-                          </Badge>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-2">
-                          <TextCell value={row.requiredMajor} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredMajor: value })} placeholder="전공" />
-                          <TextCell value={row.requiredCertification} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredCertification: value })} placeholder="자격증" />
-                          <TextCell value={row.minKnowledge} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minKnowledge: value })} placeholder="최소실무지식/경력" />
-                          <TextCell value={row.proficiencyPeriod} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { proficiencyPeriod: value })} placeholder="숙달기간" />
-                          <TextAreaCell value={row.requiredTraining} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredTraining: value })} placeholder="필수교육" />
-                          <TextCell value={row.languageRequirement} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { languageRequirement: value })} placeholder="언어/수준" />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="grid grid-cols-2 gap-2">
-                          <TextCell value={row.deptHeadLevel} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { deptHeadLevel: value })} placeholder="팀장" className="w-24" />
-                          <TextCell value={row.managerLevel} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { managerLevel: value })} placeholder="과장 이상" className="w-24" />
-                          <TextCell value={row.staffLevel} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { staffLevel: value })} placeholder="과장 미만" className="w-24" />
-                          <TextCell value={row.minimumLevel} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minimumLevel: value })} placeholder="최소" className="w-24" />
-                        </div>
-                      </TableCell>
-                      {detail.teamMembers.map((member) => (
-                        <TableCell key={member.id}>
-                          {(() => {
-                            const value = scoreFor(row, member.id);
-                            const isMissing = !hasText(value);
-                            return (
-                          <Input
-                            type="number"
-                            min="0"
-                            max="5"
-                            step="0.5"
-                            value={value}
-                            onChange={(event) => updateScore(index, member, event.target.value)}
-                            disabled={isReportLocked}
-                            className={`w-20 text-center ${isMissing ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50/40"}`}
-                          />
-                            );
-                          })()}
-                        </TableCell>
-                      ))}
-                      <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("requirements", index)} disabled={isReportLocked}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                  </select>
+                  <Button variant="outline" size="sm" onClick={addWorkCategory} disabled={isReportLocked}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    업무 추가
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={addRequirement} disabled={isReportLocked}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    기준 추가
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                <div className="rounded-lg border bg-white p-4">
+                  <div className="text-xs font-medium text-muted-foreground">전체 업무 영역</div>
+                  <div className="mt-2 text-2xl font-bold text-blue-700">{detail.workCategories.length}개</div>
+                  <div className="mt-1 text-xs text-muted-foreground">대분류</div>
+                </div>
+                <div className="rounded-lg border bg-white p-4">
+                  <div className="text-xs font-medium text-muted-foreground">전체 세부 업무</div>
+                  <div className="mt-2 text-2xl font-bold text-blue-700">{detail.requirements.length}개</div>
+                  <div className="mt-1 text-xs text-muted-foreground">요구기준 항목</div>
+                </div>
+                <div className="rounded-lg border bg-white p-4">
+                  <div className="text-xs font-medium text-muted-foreground">평균 요구 수준</div>
+                  <div className="mt-2 text-2xl font-bold">{formatAverage(competencyStats.requiredAverage)} / 5</div>
+                  <div className="mt-1 text-xs text-muted-foreground">필수 수준 평균</div>
+                </div>
+                <div className="rounded-lg border bg-white p-4">
+                  <div className="text-xs font-medium text-muted-foreground">현재 평균 수준</div>
+                  <div className="mt-2 text-2xl font-bold">{formatAverage(competencyStats.selectedAverage)} / 5</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{selectedMember?.name ?? "선택 인원"} 기준</div>
+                </div>
+                <div className="rounded-lg border bg-white p-4">
+                  <div className="text-xs font-medium text-muted-foreground">평균 GAP</div>
+                  <div className={`mt-2 text-2xl font-bold ${competencyStats.averageGap !== null && competencyStats.averageGap < 0 ? "text-red-600" : "text-emerald-600"}`}>
+                    {gapLabel(competencyStats.averageGap)}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">현재 - 요구</div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">역량 수준 분포</div>
+                    <div className="text-xs text-muted-foreground">{selectedMember?.name ?? "선택 인원"} 현재 수준 기준</div>
+                  </div>
+                  <Badge variant="outline">팀 평균 {formatAverage(competencyStats.teamAverage)} / 5</Badge>
+                </div>
+                <div className="mt-4 flex h-4 overflow-hidden rounded-full bg-slate-100">
+                  {selectedLevelTotal === 0 ? (
+                    <div className="h-full w-full bg-slate-200" />
+                  ) : (
+                    selectedLevelDistribution.map((bucket, index) => (
+                      <div
+                        key={bucket.level}
+                        className={["bg-red-500", "bg-orange-400", "bg-amber-300", "bg-emerald-500", "bg-blue-600"][index]}
+                        style={{ width: `${(bucket.count / selectedLevelTotal) * 100}%` }}
+                      />
+                    ))
+                  )}
+                </div>
+                <div className="mt-3 grid grid-cols-5 gap-2 text-center text-xs">
+                  {selectedLevelDistribution.map((bucket) => (
+                    <div key={bucket.level}>
+                      <div className="font-semibold">Lv.{bucket.level}</div>
+                      <div className="text-muted-foreground">
+                        {bucket.count}개 ({selectedLevelTotal ? Math.round((bucket.count / selectedLevelTotal) * 100) : 0}%)
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <fieldset disabled={isReportLocked} className="contents">
+                <div className="overflow-x-auto rounded-lg border bg-white" data-testid="team-competency-merged-matrix">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="min-w-[260px]">대분류</TableHead>
+                        <TableHead className="min-w-[240px]">세부 업무</TableHead>
+                        <TableHead className="min-w-[260px]">주요 업무 기능</TableHead>
+                        <TableHead className="min-w-[120px] text-center">필수 수준</TableHead>
+                        <TableHead className="min-w-[120px] text-center">팀 평균</TableHead>
+                        <TableHead className="min-w-[150px] text-center">선택 인원</TableHead>
+                        <TableHead className="min-w-[100px] text-center">GAP</TableHead>
+                        <TableHead className="min-w-[120px] text-center">육성 필요도</TableHead>
+                        <TableHead className="min-w-[260px]">관련 교육 / Tool</TableHead>
+                        <TableHead className="w-[60px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {competencyGroups.map((group) =>
+                        group.rows.map(({ row, index }, rowIndex) => {
+                          const categoryIndex = group.workCategoryIndex;
+                          const category = group.workCategory;
+                          const requiredLevel = levelNumber(row.minimumLevel);
+                          const teamAverage = average(detail.teamMembers.map((member) => scoreNumberFor(row, member.id)));
+                          const selectedScore = selectedMember ? scoreNumberFor(row, selectedMember.id) : null;
+                          const gap = selectedScore !== null && requiredLevel !== null ? selectedScore - requiredLevel : null;
+                          const need = needSummary(gap);
+                          const majorFunction = numberedLine(category?.majorFunctions, row.subNo) || row.subName || "";
+                          const toolHint = numberedLine(category?.controlItems, row.subNo);
+
+                          return (
+                            <TableRow key={row.id ?? index} className={gap !== null && gap < 0 ? "bg-red-50/30" : undefined}>
+                              {rowIndex === 0 && (
+                                <TableCell rowSpan={Math.max(group.rows.length, 1)} className="align-top border-r bg-slate-50/70">
+                                  <div className="space-y-3">
+                                    <div className="flex gap-2">
+                                      <TextCell
+                                        value={category?.categoryNo ?? group.majorNo}
+                                        onChange={(value) =>
+                                          categoryIndex !== undefined
+                                            ? updateArrayRow<WorkCategory>("workCategories", categoryIndex, { categoryNo: value })
+                                            : updateArrayRow<Requirement>("requirements", index, { majorNo: value })
+                                        }
+                                        placeholder="No"
+                                        className="w-16"
+                                      />
+                                      <TextCell
+                                        value={category?.categoryName ?? group.majorName}
+                                        onChange={(value) =>
+                                          categoryIndex !== undefined
+                                            ? updateArrayRow<WorkCategory>("workCategories", categoryIndex, { categoryName: value })
+                                            : updateArrayRow<Requirement>("requirements", index, { majorName: value })
+                                        }
+                                        placeholder="대분류"
+                                        className="min-w-[160px]"
+                                      />
+                                    </div>
+                                    <Badge variant="outline">{group.rows.length}개 세부 업무</Badge>
+                                    {categoryIndex !== undefined && (
+                                      <>
+                                        <TextAreaCell
+                                          value={category?.majorFunctions}
+                                          onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { majorFunctions: value })}
+                                          placeholder="주요 업무 기능"
+                                          className="min-w-[220px]"
+                                        />
+                                        <TextAreaCell
+                                          value={category?.controlItems}
+                                          onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { controlItems: value })}
+                                          placeholder="중점관리 항목 / Tool"
+                                          className="min-w-[220px]"
+                                        />
+                                      </>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              )}
+                              <TableCell className="align-top">
+                                <div className="space-y-2">
+                                  <div className="flex gap-2">
+                                    <TextCell value={row.subNo} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subNo: value })} placeholder="No" className="w-16" />
+                                    <TextCell value={row.subName} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subName: value })} placeholder="업무명" className="min-w-[160px]" />
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <TextCell value={row.requiredMajor} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredMajor: value })} placeholder="전공" className="min-w-[110px]" />
+                                    <TextCell value={row.requiredCertification} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredCertification: value })} placeholder="자격증" className="min-w-[110px]" />
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <Textarea
+                                  value={majorFunction}
+                                  readOnly
+                                  placeholder="주요 업무 기능"
+                                  className="min-h-[64px] min-w-[240px] resize-y bg-slate-50"
+                                />
+                              </TableCell>
+                              <TableCell className="text-center align-top">
+                                <div className="space-y-2">
+                                  <TextCell value={row.minimumLevel} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minimumLevel: value })} placeholder="Lv" className="mx-auto w-20 text-center" />
+                                  <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${levelBadgeClass(requiredLevel)}`}>
+                                    {formatLevel(row.minimumLevel)}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center align-top">
+                                <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${levelBadgeClass(teamAverage, requiredLevel)}`}>
+                                  {formatLevel(teamAverage)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-center align-top">
+                                {selectedMember ? (
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    max="5"
+                                    step="0.5"
+                                    value={scoreFor(row, selectedMember.id)}
+                                    onChange={(event) => updateScore(index, selectedMember, event.target.value)}
+                                    disabled={isReportLocked}
+                                    className={`mx-auto w-20 text-center ${selectedScore === null ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50/40"}`}
+                                  />
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center align-top">
+                                <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${gap !== null && gap < 0 ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                                  {gapLabel(gap)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-center align-top">
+                                <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${need.className}`}>
+                                  {need.label}
+                                </span>
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <div className="space-y-2">
+                                  <TextAreaCell
+                                    value={row.requiredTraining}
+                                    onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredTraining: value })}
+                                    placeholder="관련 교육 / Tool"
+                                    className="min-w-[240px]"
+                                  />
+                                  {toolHint && <div className="rounded-md bg-slate-50 px-2 py-1 text-xs text-muted-foreground">{toolHint}</div>}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <TextCell value={row.proficiencyPeriod} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { proficiencyPeriod: value })} placeholder="숙달기간" className="min-w-[110px]" />
+                                    <TextCell value={row.languageRequirement} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { languageRequirement: value })} placeholder="언어/수준" className="min-w-[110px]" />
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <Button variant="ghost" size="sm" onClick={() => removeArrayRow("requirements", index)} disabled={isReportLocked}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        }),
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </fieldset>
             </TabsContent>
 

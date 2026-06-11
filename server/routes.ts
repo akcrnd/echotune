@@ -2267,6 +2267,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await client.query("BEGIN");
 
+      const existingReport = await client.query(
+        "SELECT id, status FROM team_competency_reports WHERE id = $1 FOR UPDATE",
+        [reportId],
+      );
+
+      if (!existingReport.rows[0]) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "팀 적격성 보고서를 찾을 수 없습니다." });
+      }
+
+      if (existingReport.rows[0].status === "approved") {
+        await client.query("ROLLBACK");
+        return res.status(423).json({ error: "승인된 보고서는 수정할 수 없습니다." });
+      }
+
+      const nextStatus = toNullableString(report.status) ?? existingReport.rows[0].status;
+      if (!["draft", "review", "approved"].includes(nextStatus)) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "유효하지 않은 보고서 상태입니다." });
+      }
+
       const reportResult = await client.query(
         `
           UPDATE team_competency_reports
@@ -2275,7 +2296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               prepared_by = $4,
               checked_by = $5,
               approved_by = $6,
-              status = COALESCE($7, status),
+              status = $7,
               notes = $8,
               updated_at = NOW()
           WHERE id = $1
@@ -2288,14 +2309,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
           toNullableString(report.preparedBy),
           toNullableString(report.checkedBy),
           toNullableString(report.approvedBy),
-          toNullableString(report.status),
+          nextStatus,
           toNullableString(report.notes),
         ],
       );
 
-      if (!reportResult.rows[0]) {
-        await client.query("ROLLBACK");
-        return res.status(404).json({ error: "팀 적격성 보고서를 찾을 수 없습니다." });
+      const reportRow = reportResult.rows[0];
+      const members = await getOrderedTeamMembers(reportRow.team_code, reportRow.team_name, client);
+      type EditableAssignmentFields = {
+        responsibilities?: unknown;
+        deputyEmployeeId?: unknown;
+        deputyName?: unknown;
+      };
+      const assignmentsByEmployeeId = new Map<string, EditableAssignmentFields>();
+      for (const row of assignments as Array<EditableAssignmentFields & { employeeId?: unknown }>) {
+        const employeeId = toNullableString(row.employeeId);
+        if (employeeId) assignmentsByEmployeeId.set(employeeId, row);
+      }
+
+      await client.query(
+        `
+          DELETE FROM team_role_assignments
+          WHERE report_id = $1
+            AND employee_id IS NOT NULL
+            AND NOT (employee_id = ANY($2::varchar[]))
+        `,
+        [reportId, members.map((member: any) => member.id)],
+      );
+
+      for (const member of members) {
+        const row = assignmentsByEmployeeId.get(member.id) ?? {};
+        const updateResult = await client.query(
+          `
+            UPDATE team_role_assignments
+            SET role_group = $3,
+                employee_name = $4,
+                position_title = $5,
+                responsibilities = $6,
+                deputy_employee_id = $7,
+                deputy_name = $8,
+                display_order = $9,
+                updated_at = NOW()
+            WHERE report_id = $1 AND employee_id = $2
+          `,
+          [
+            reportId,
+            member.id,
+            reportRow.team_name,
+            member.name,
+            member.position,
+            toNullableString(row.responsibilities),
+            toNullableString(row.deputyEmployeeId),
+            toNullableString(row.deputyName),
+            member.org_order,
+          ],
+        );
+
+        if (updateResult.rowCount === 0) {
+          await client.query(
+            `
+              INSERT INTO team_role_assignments
+                (report_id, role_group, employee_id, employee_name, position_title, responsibilities, deputy_employee_id, deputy_name, display_order)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            `,
+            [
+              reportId,
+              reportRow.team_name,
+              member.id,
+              member.name,
+              member.position,
+              toNullableString(row.responsibilities),
+              toNullableString(row.deputyEmployeeId),
+              toNullableString(row.deputyName),
+              member.org_order,
+            ],
+          );
+        }
       }
 
       await client.query(
@@ -2309,30 +2398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       await client.query("DELETE FROM team_competency_requirements WHERE report_id = $1", [reportId]);
       await client.query("DELETE FROM team_work_categories WHERE report_id = $1", [reportId]);
-      await client.query("DELETE FROM team_role_assignments WHERE report_id = $1", [reportId]);
       await client.query("DELETE FROM team_required_qualifications WHERE report_id = $1", [reportId]);
-
-      for (let index = 0; index < assignments.length; index += 1) {
-        const row = assignments[index] ?? {};
-        await client.query(
-          `
-            INSERT INTO team_role_assignments
-              (report_id, role_group, employee_id, employee_name, position_title, responsibilities, deputy_employee_id, deputy_name, display_order)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          `,
-          [
-            reportId,
-            toNullableString(row.roleGroup),
-            toNullableString(row.employeeId),
-            toNullableString(row.employeeName),
-            toNullableString(row.positionTitle),
-            toNullableString(row.responsibilities),
-            toNullableString(row.deputyEmployeeId),
-            toNullableString(row.deputyName),
-            toIntegerOrDefault(row.displayOrder, index),
-          ],
-        );
-      }
 
       for (let index = 0; index < workCategories.length; index += 1) {
         const row = workCategories[index] ?? {};

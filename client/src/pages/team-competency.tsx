@@ -153,11 +153,13 @@ function TextCell({
   value,
   onChange,
   placeholder,
+  disabled = false,
   className = "min-w-[120px]",
 }: {
   value?: string | number | null;
   onChange: (value: string) => void;
   placeholder?: string;
+  disabled?: boolean;
   className?: string;
 }) {
   return (
@@ -165,6 +167,7 @@ function TextCell({
       value={value ?? ""}
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
+      disabled={disabled}
       className={className}
     />
   );
@@ -174,11 +177,13 @@ function TextAreaCell({
   value,
   onChange,
   placeholder,
+  disabled = false,
   className = "min-w-[220px]",
 }: {
   value?: string | null;
   onChange: (value: string) => void;
   placeholder?: string;
+  disabled?: boolean;
   className?: string;
 }) {
   return (
@@ -186,6 +191,7 @@ function TextAreaCell({
       value={value ?? ""}
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
+      disabled={disabled}
       className={`min-h-[64px] resize-y ${className}`}
     />
   );
@@ -497,6 +503,8 @@ export default function TeamCompetency() {
   const scoreFor = (requirement: Requirement, memberId: string) =>
     requirement.scores?.find((score) => score.employeeId === memberId)?.score ?? "";
 
+  const isReportLocked = detail?.report.status === "approved";
+
   return (
     <div className="p-6 space-y-5" data-testid="team-competency-page">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -531,7 +539,7 @@ export default function TeamCompetency() {
             <Plus className="mr-2 h-4 w-4" />
             보고서 준비
           </Button>
-          <Button onClick={() => saveMutation.mutate()} disabled={!detail || saveMutation.isPending}>
+          <Button onClick={() => saveMutation.mutate()} disabled={!detail || isReportLocked || saveMutation.isPending}>
             <Save className="mr-2 h-4 w-4" />
             저장
           </Button>
@@ -540,6 +548,11 @@ export default function TeamCompetency() {
 
       {detail ? (
         <>
+          {isReportLocked && (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              승인된 보고서입니다. 조직 정보와 평가 내용은 읽기 전용으로 잠겨 있습니다.
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">
@@ -596,13 +609,14 @@ export default function TeamCompetency() {
           </div>
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
-            <TextCell value={detail.report.revision} onChange={(value) => updateReport("revision", value)} placeholder="Rev.00" />
-            <TextCell value={detail.report.preparedBy} onChange={(value) => updateReport("preparedBy", value)} placeholder="작성" />
-            <TextCell value={detail.report.checkedBy} onChange={(value) => updateReport("checkedBy", value)} placeholder="검토" />
-            <TextCell value={detail.report.approvedBy} onChange={(value) => updateReport("approvedBy", value)} placeholder="승인" />
+            <TextCell disabled={isReportLocked} value={detail.report.revision} onChange={(value) => updateReport("revision", value)} placeholder="Rev.00" />
+            <TextCell disabled={isReportLocked} value={detail.report.preparedBy} onChange={(value) => updateReport("preparedBy", value)} placeholder="작성" />
+            <TextCell disabled={isReportLocked} value={detail.report.checkedBy} onChange={(value) => updateReport("checkedBy", value)} placeholder="검토" />
+            <TextCell disabled={isReportLocked} value={detail.report.approvedBy} onChange={(value) => updateReport("approvedBy", value)} placeholder="승인" />
             <select
               value={detail.report.status}
               onChange={(event) => updateReport("status", event.target.value)}
+              disabled={isReportLocked}
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
             >
               <option value="draft">작성중</option>
@@ -624,6 +638,7 @@ export default function TeamCompetency() {
                 <Badge variant="outline">{detail.report.teamName} / {detail.report.evaluationYear}</Badge>
                 <Badge variant="secondary">조직도 기준 자동 정렬</Badge>
               </div>
+              <fieldset disabled={isReportLocked} className="contents">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -667,15 +682,17 @@ export default function TeamCompetency() {
                   })}
                 </TableBody>
               </Table>
+              </fieldset>
             </TabsContent>
 
             <TabsContent value="work" className="space-y-3">
               <div className="flex justify-end">
-                <Button variant="outline" size="sm" onClick={addWorkCategory}>
+                <Button variant="outline" size="sm" onClick={addWorkCategory} disabled={isReportLocked}>
                   <Plus className="mr-2 h-4 w-4" />
                   업무 추가
                 </Button>
               </div>
+              <fieldset disabled={isReportLocked} className="contents">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -721,15 +738,17 @@ export default function TeamCompetency() {
                   ))}
                 </TableBody>
               </Table>
+              </fieldset>
             </TabsContent>
 
             <TabsContent value="requirements" className="space-y-3">
               <div className="flex justify-end">
-                <Button variant="outline" size="sm" onClick={addRequirement}>
+                <Button variant="outline" size="sm" onClick={addRequirement} disabled={isReportLocked}>
                   <Plus className="mr-2 h-4 w-4" />
                   기준 추가
                 </Button>
               </div>
+              <fieldset disabled={isReportLocked} className="contents">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -800,6 +819,7 @@ export default function TeamCompetency() {
                   ))}
                 </TableBody>
               </Table>
+              </fieldset>
             </TabsContent>
 
             <TabsContent value="qualifications" className="space-y-3">
@@ -813,11 +833,12 @@ export default function TeamCompetency() {
                     <Badge variant="secondary">직원 증빙 데이터 미입력</Badge>
                   )}
                 </div>
-                <Button variant="outline" size="sm" onClick={addQualification}>
+                <Button variant="outline" size="sm" onClick={addQualification} disabled={isReportLocked}>
                   <Plus className="mr-2 h-4 w-4" />
                   자격 추가
                 </Button>
               </div>
+              <fieldset disabled={isReportLocked} className="contents">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -867,6 +888,7 @@ export default function TeamCompetency() {
                   ))}
                 </TableBody>
               </Table>
+              </fieldset>
             </TabsContent>
           </Tabs>
         </>

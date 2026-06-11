@@ -1296,7 +1296,6 @@ export default function TeamCompetency() {
                         <TableHead className="min-w-[100px] text-center">GAP</TableHead>
                         <TableHead className="min-w-[120px] text-center">육성 필요도</TableHead>
                         <TableHead className="min-w-[260px]">관련 교육 / Tool</TableHead>
-                        <TableHead className="w-[60px]"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1412,9 +1411,20 @@ export default function TeamCompetency() {
                               )}
                               <TableCell className="align-top">
                                 <div className="space-y-2">
-                                  <div className="flex gap-2">
+                                  <div className="flex items-start gap-2">
                                     <TextCell value={row.subNo} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subNo: value })} placeholder="No" className="w-16" />
                                     <TextCell value={row.subName} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subName: value })} placeholder="업무명" className="min-w-[160px]" />
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => removeArrayRow("requirements", index)}
+                                      disabled={isReportLocked}
+                                      title="세부업무 삭제"
+                                      aria-label={`${row.subName ?? "세부업무"} 삭제`}
+                                      className="h-10 w-10 shrink-0 text-muted-foreground hover:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
                                   </div>
                                   <div className="grid grid-cols-2 gap-2">
                                     <TextCell value={row.requiredMajor} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredMajor: value })} placeholder="전공" className="min-w-[110px]" />
@@ -1498,11 +1508,6 @@ export default function TeamCompetency() {
                                     <TextCell value={row.languageRequirement} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { languageRequirement: value })} placeholder="언어/수준" className="min-w-[110px]" />
                                   </div>
                                 </div>
-                              </TableCell>
-                              <TableCell className="align-top">
-                                <Button variant="ghost" size="sm" onClick={() => removeArrayRow("requirements", index)} disabled={isReportLocked}>
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
                               </TableCell>
                             </TableRow>
                           );

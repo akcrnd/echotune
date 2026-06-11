@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Award, BriefcaseBusiness, CheckCircle2, ClipboardCheck, Plus, Save, ShieldCheck, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Award, BriefcaseBusiness, CheckCircle2, ClipboardCheck, Pencil, Plus, Save, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -206,6 +209,32 @@ function numberedLine(value?: string | null, no?: string | null) {
   return matched ?? lines[0] ?? "";
 }
 
+function parseScoreNotes(notes?: string | null) {
+  if (!hasText(notes)) return { applicable: true, note: "" };
+  try {
+    const parsed = JSON.parse(String(notes));
+    if (parsed && typeof parsed === "object") {
+      return {
+        applicable: parsed.applicable !== false,
+        note: typeof parsed.note === "string" ? parsed.note : "",
+      };
+    }
+  } catch {
+    return { applicable: true, note: String(notes ?? "") };
+  }
+  return { applicable: true, note: String(notes ?? "") };
+}
+
+function scoreIsApplicable(score?: RequirementScore) {
+  return parseScoreNotes(score?.notes).applicable;
+}
+
+function serializeScoreNotes(applicable: boolean, notes?: string | null) {
+  const parsed = parseScoreNotes(notes);
+  if (applicable && !parsed.note) return null;
+  return JSON.stringify({ applicable, note: parsed.note || undefined });
+}
+
 function TextCell({
   value,
   onChange,
@@ -371,12 +400,15 @@ export default function TeamCompetency() {
 
   const scoreStats = useMemo(() => {
     if (!detail) return { entered: 0, total: 0, average: 0 };
-    const scores = detail.requirements.flatMap((requirement) => requirement.scores ?? []);
-    const numericScores = scores
-      .filter((score) => score.score !== null && score.score !== undefined && score.score !== "")
-      .map((score) => Number(score.score))
+    const scoreRows = detail.requirements.flatMap((requirement) =>
+      detail.teamMembers.map((member) => requirement.scores?.find((score) => score.employeeId === member.id)),
+    );
+    const applicableScores = scoreRows.filter((score) => scoreIsApplicable(score));
+    const numericScores = applicableScores
+      .filter((score) => score?.score !== null && score?.score !== undefined && score?.score !== "")
+      .map((score) => Number(score?.score))
       .filter((score) => Number.isFinite(score));
-    const total = detail.requirements.length * detail.teamMembers.length;
+    const total = applicableScores.length;
     const average = numericScores.length
       ? numericScores.reduce((sum, score) => sum + score, 0) / numericScores.length
       : 0;
@@ -535,27 +567,49 @@ export default function TeamCompetency() {
   };
 
   const addWorkCategory = () => {
-    setDetail((current) =>
-      current
-        ? {
-            ...current,
-            workCategories: [
-              ...current.workCategories,
-              {
-                id: makeLocalId("work"),
-                categoryNo: String(current.workCategories.length + 1),
-                categoryName: "",
-                majorFunctions: "",
-                controlItems: "",
-                relatedDocs: "",
-                cooperatingTeam: "",
-                cooperatingWork: "",
-                displayOrder: current.workCategories.length,
-              },
-            ],
-          }
-        : current,
-    );
+    setDetail((current) => {
+      if (!current) return current;
+      const categoryNo = String(current.workCategories.length + 1);
+      return {
+        ...current,
+        workCategories: [
+          ...current.workCategories,
+          {
+            id: makeLocalId("work"),
+            categoryNo,
+            categoryName: "",
+            majorFunctions: "",
+            controlItems: "",
+            relatedDocs: "",
+            cooperatingTeam: "",
+            cooperatingWork: "",
+            displayOrder: current.workCategories.length,
+          },
+        ],
+        requirements: [
+          ...current.requirements,
+          {
+            id: makeLocalId("requirement"),
+            majorNo: categoryNo,
+            majorName: "",
+            subNo: "1",
+            subName: "",
+            requiredMajor: "",
+            requiredCertification: "",
+            minKnowledge: "",
+            proficiencyPeriod: "",
+            requiredTraining: "",
+            languageRequirement: "",
+            deptHeadLevel: "",
+            managerLevel: "",
+            staffLevel: "",
+            minimumLevel: "",
+            displayOrder: current.requirements.length,
+            scores: [],
+          },
+        ],
+      };
+    });
   };
 
   const addRequirement = () => {
@@ -570,6 +624,38 @@ export default function TeamCompetency() {
                 majorNo: "",
                 majorName: "",
                 subNo: "",
+                subName: "",
+                requiredMajor: "",
+                requiredCertification: "",
+                minKnowledge: "",
+                proficiencyPeriod: "",
+                requiredTraining: "",
+                languageRequirement: "",
+                deptHeadLevel: "",
+                managerLevel: "",
+                staffLevel: "",
+                minimumLevel: "",
+                displayOrder: current.requirements.length,
+                scores: [],
+              },
+            ],
+          }
+        : current,
+    );
+  };
+
+  const addRequirementForCategory = (majorNo?: string | null, majorName?: string | null, nextSubNo?: number) => {
+    setDetail((current) =>
+      current
+        ? {
+            ...current,
+            requirements: [
+              ...current.requirements,
+              {
+                id: makeLocalId("requirement"),
+                majorNo: majorNo ?? "",
+                majorName: majorName ?? "",
+                subNo: nextSubNo ? String(nextSubNo) : "",
                 subName: "",
                 requiredMajor: "",
                 requiredCertification: "",
@@ -622,12 +708,40 @@ export default function TeamCompetency() {
       const requirement = { ...requirements[requirementIndex] };
       const scores = [...(requirement.scores ?? [])];
       const scoreIndex = scores.findIndex((score) => score.employeeId === member.id);
+      const previousScore = scoreIndex >= 0 ? scores[scoreIndex] : {};
       const nextScore = {
-        ...(scoreIndex >= 0 ? scores[scoreIndex] : {}),
+        ...previousScore,
         employeeId: member.id,
         employeeName: member.name,
         score: value,
+        notes: hasText(value) ? serializeScoreNotes(true, previousScore.notes) : previousScore.notes,
       };
+      if (scoreIndex >= 0) {
+        scores[scoreIndex] = nextScore;
+      } else {
+        scores.push(nextScore);
+      }
+      requirements[requirementIndex] = { ...requirement, scores };
+      return { ...current, requirements };
+    });
+  };
+
+  const updateScoreApplicability = (requirementIndex: number, member: TeamMember, applicable: boolean) => {
+    setDetail((current) => {
+      if (!current) return current;
+      const requirements = [...current.requirements];
+      const requirement = { ...requirements[requirementIndex] };
+      const scores = [...(requirement.scores ?? [])];
+      const scoreIndex = scores.findIndex((score) => score.employeeId === member.id);
+      const previousScore = scoreIndex >= 0 ? scores[scoreIndex] : {};
+      const nextScore = {
+        ...previousScore,
+        employeeId: member.id,
+        employeeName: member.name,
+        score: applicable ? previousScore.score ?? "" : "",
+        notes: serializeScoreNotes(applicable, previousScore.notes),
+      };
+
       if (scoreIndex >= 0) {
         scores[scoreIndex] = nextScore;
       } else {
@@ -641,8 +755,15 @@ export default function TeamCompetency() {
   const scoreFor = (requirement: Requirement, memberId: string) =>
     requirement.scores?.find((score) => score.employeeId === memberId)?.score ?? "";
 
+  const scoreRowFor = (requirement: Requirement, memberId?: string | null) =>
+    memberId ? requirement.scores?.find((score) => score.employeeId === memberId) : undefined;
+
+  const scoreApplicableFor = (requirement: Requirement, memberId?: string | null) =>
+    scoreIsApplicable(scoreRowFor(requirement, memberId));
+
   const scoreNumberFor = (requirement: Requirement, memberId?: string | null) => {
     if (!memberId) return null;
+    if (!scoreApplicableFor(requirement, memberId)) return null;
     return levelNumber(scoreFor(requirement, memberId));
   };
 
@@ -1170,6 +1291,7 @@ export default function TeamCompetency() {
                         <TableHead className="min-w-[260px]">주요 업무 기능</TableHead>
                         <TableHead className="min-w-[120px] text-center">필수 수준</TableHead>
                         <TableHead className="min-w-[120px] text-center">팀 평균</TableHead>
+                        <TableHead className="min-w-[96px] text-center">해당</TableHead>
                         <TableHead className="min-w-[150px] text-center">선택 인원</TableHead>
                         <TableHead className="min-w-[100px] text-center">GAP</TableHead>
                         <TableHead className="min-w-[120px] text-center">육성 필요도</TableHead>
@@ -1184,9 +1306,12 @@ export default function TeamCompetency() {
                           const category = group.workCategory;
                           const requiredLevel = levelNumber(row.minimumLevel);
                           const teamAverage = average(detail.teamMembers.map((member) => scoreNumberFor(row, member.id)));
-                          const selectedScore = selectedMember ? scoreNumberFor(row, selectedMember.id) : null;
-                          const gap = selectedScore !== null && requiredLevel !== null ? selectedScore - requiredLevel : null;
-                          const need = needSummary(gap);
+                          const selectedApplicable = selectedMember ? scoreApplicableFor(row, selectedMember.id) : true;
+                          const selectedScore = selectedMember && selectedApplicable ? scoreNumberFor(row, selectedMember.id) : null;
+                          const gap = selectedApplicable && selectedScore !== null && requiredLevel !== null ? selectedScore - requiredLevel : null;
+                          const need = selectedApplicable
+                            ? needSummary(gap)
+                            : { label: "비해당", className: "border-slate-200 bg-slate-50 text-slate-600" };
                           const majorFunction = numberedLine(category?.majorFunctions, row.subNo) || row.subName || "";
                           const toolHint = numberedLine(category?.controlItems, row.subNo);
 
@@ -1195,45 +1320,93 @@ export default function TeamCompetency() {
                               {rowIndex === 0 && (
                                 <TableCell rowSpan={Math.max(group.rows.length, 1)} className="align-top border-r bg-slate-50/70">
                                   <div className="space-y-3">
-                                    <div className="flex gap-2">
-                                      <TextCell
-                                        value={category?.categoryNo ?? group.majorNo}
-                                        onChange={(value) =>
-                                          categoryIndex !== undefined
-                                            ? updateArrayRow<WorkCategory>("workCategories", categoryIndex, { categoryNo: value })
-                                            : updateArrayRow<Requirement>("requirements", index, { majorNo: value })
-                                        }
-                                        placeholder="No"
-                                        className="w-16"
-                                      />
-                                      <TextCell
-                                        value={category?.categoryName ?? group.majorName}
-                                        onChange={(value) =>
-                                          categoryIndex !== undefined
-                                            ? updateArrayRow<WorkCategory>("workCategories", categoryIndex, { categoryName: value })
-                                            : updateArrayRow<Requirement>("requirements", index, { majorName: value })
-                                        }
-                                        placeholder="대분류"
-                                        className="min-w-[160px]"
-                                      />
+                                    <HoverCard>
+                                      <HoverCardTrigger asChild>
+                                        <button type="button" className="w-full rounded-md border bg-white px-3 py-2 text-left hover:bg-slate-50">
+                                          <div className="text-xs font-medium text-muted-foreground">대분류 {category?.categoryNo ?? group.majorNo ?? "-"}</div>
+                                          <div className="mt-1 font-semibold">{category?.categoryName ?? group.majorName ?? "대분류 미입력"}</div>
+                                          <div className="mt-2 text-xs text-muted-foreground">{group.rows.length}개 세부 업무</div>
+                                        </button>
+                                      </HoverCardTrigger>
+                                      <HoverCardContent className="w-[420px]">
+                                        <div className="space-y-3 text-sm">
+                                          <div>
+                                            <div className="font-semibold">주요 업무 기능</div>
+                                            <div className="mt-1 whitespace-pre-line text-muted-foreground">{category?.majorFunctions || "-"}</div>
+                                          </div>
+                                          <div>
+                                            <div className="font-semibold">중점관리 항목</div>
+                                            <div className="mt-1 whitespace-pre-line text-muted-foreground">{category?.controlItems || "-"}</div>
+                                          </div>
+                                        </div>
+                                      </HoverCardContent>
+                                    </HoverCard>
+                                    <div className="flex flex-wrap gap-2">
+                                      <Dialog>
+                                        <DialogTrigger asChild>
+                                          <Button variant="outline" size="sm" disabled={categoryIndex === undefined}>
+                                            <Pencil className="mr-2 h-4 w-4" />
+                                            대분류 수정
+                                          </Button>
+                                        </DialogTrigger>
+                                        <DialogContent className="max-w-2xl">
+                                          <DialogHeader>
+                                            <DialogTitle>대분류 관리</DialogTitle>
+                                            <DialogDescription>{category?.categoryName ?? group.majorName ?? "대분류"} 업무 기능과 관리 항목</DialogDescription>
+                                          </DialogHeader>
+                                          {categoryIndex !== undefined && (
+                                            <div className="space-y-3">
+                                              <div className="grid grid-cols-[90px_1fr] gap-2">
+                                                <TextCell
+                                                  value={category?.categoryNo}
+                                                  onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { categoryNo: value })}
+                                                  placeholder="No"
+                                                  disabled={isReportLocked}
+                                                  className="w-full"
+                                                />
+                                                <TextCell
+                                                  value={category?.categoryName}
+                                                  onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { categoryName: value })}
+                                                  placeholder="대분류"
+                                                  disabled={isReportLocked}
+                                                  className="w-full"
+                                                />
+                                              </div>
+                                              <TextAreaCell
+                                                value={category?.majorFunctions}
+                                                onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { majorFunctions: value })}
+                                                placeholder="주요 업무 기능"
+                                                disabled={isReportLocked}
+                                                className="min-w-full"
+                                              />
+                                              <TextAreaCell
+                                                value={category?.controlItems}
+                                                onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { controlItems: value })}
+                                                placeholder="중점관리 항목 / Tool"
+                                                disabled={isReportLocked}
+                                                className="min-w-full"
+                                              />
+                                              <TextAreaCell
+                                                value={category?.relatedDocs}
+                                                onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { relatedDocs: value })}
+                                                placeholder="관련 문서/법규"
+                                                disabled={isReportLocked}
+                                                className="min-w-full"
+                                              />
+                                            </div>
+                                          )}
+                                        </DialogContent>
+                                      </Dialog>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => addRequirementForCategory(category?.categoryNo ?? group.majorNo, category?.categoryName ?? group.majorName, group.rows.length + 1)}
+                                        disabled={isReportLocked}
+                                      >
+                                        <Plus className="mr-2 h-4 w-4" />
+                                        세부업무 추가
+                                      </Button>
                                     </div>
-                                    <Badge variant="outline">{group.rows.length}개 세부 업무</Badge>
-                                    {categoryIndex !== undefined && (
-                                      <>
-                                        <TextAreaCell
-                                          value={category?.majorFunctions}
-                                          onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { majorFunctions: value })}
-                                          placeholder="주요 업무 기능"
-                                          className="min-w-[220px]"
-                                        />
-                                        <TextAreaCell
-                                          value={category?.controlItems}
-                                          onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { controlItems: value })}
-                                          placeholder="중점관리 항목 / Tool"
-                                          className="min-w-[220px]"
-                                        />
-                                      </>
-                                    )}
                                   </div>
                                 </TableCell>
                               )}
@@ -1272,6 +1445,21 @@ export default function TeamCompetency() {
                               </TableCell>
                               <TableCell className="text-center align-top">
                                 {selectedMember ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <Checkbox
+                                      checked={selectedApplicable}
+                                      onCheckedChange={(checked) => updateScoreApplicability(index, selectedMember, checked === true)}
+                                      disabled={isReportLocked}
+                                      aria-label={`${row.subName ?? "세부업무"} 해당 여부`}
+                                    />
+                                    <span className="text-[11px] text-muted-foreground">{selectedApplicable ? "해당" : "비해당"}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center align-top">
+                                {selectedMember ? (
                                   <Input
                                     type="number"
                                     min="0"
@@ -1279,8 +1467,8 @@ export default function TeamCompetency() {
                                     step="0.5"
                                     value={scoreFor(row, selectedMember.id)}
                                     onChange={(event) => updateScore(index, selectedMember, event.target.value)}
-                                    disabled={isReportLocked}
-                                    className={`mx-auto w-20 text-center ${selectedScore === null ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50/40"}`}
+                                    disabled={isReportLocked || !selectedApplicable}
+                                    className={`mx-auto w-20 text-center ${!selectedApplicable ? "border-slate-200 bg-slate-50 text-slate-400" : selectedScore === null ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50/40"}`}
                                   />
                                 ) : (
                                   <span className="text-xs text-muted-foreground">-</span>

@@ -64,6 +64,8 @@ After field review, the module must not behave like a blank workbook editor.
 - Existing or newly created reports are auto-repaired with the reference competency template when key sections are empty.
 - Score matrices are generated from the current team roster and requirement list.
 - Score saves are roster-governed: the API ignores non-team score rows, writes employee names from the employee table, and rejects scores outside the 0-5 range.
+- In the merged work/requirement matrix, category descriptions are viewed by hover and edited through a category dialog; sub-work rows are added within their category context.
+- Employee-specific sub-work applicability is stored with the score row metadata, so non-applicable rows are excluded from missing-score and GAP calculations.
 - Qualification tabs show evidence gaps when certification, skill, language, and training records are not yet registered.
 - Organization order follows the org chart hierarchy: `manager_id` builds the parent-child tree first, then siblings under the same manager follow org chart order/name fallback. Manual row ordering belongs in the org chart/personnel domain, not this report.
 

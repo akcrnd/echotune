@@ -31,7 +31,7 @@ npm run db:migrate-data
 4. Select branch `main`.
 5. Set compose path to `./docker-compose.yml`.
 6. Select the Dokploy SSH key that has GitHub access.
-7. Enable Auto Deploy.
+7. Enable Auto Deploy, or redeploy manually after each push.
 
 Runtime services:
 
@@ -46,7 +46,13 @@ DATABASE_URL=postgresql://postgres:EchotunePg2026@postgres:5432/echotune
 
 Do not use the external Postgres port for normal app traffic. If host-side admin/debug access is needed, temporarily uncomment the Postgres `ports` block in `docker-compose.yml`.
 
-After deployment, verify `http://<host>:22023/api/health`. A healthy deployment returns `{"status":"ok","database":true}`.
+After deployment, verify both the base health endpoint and a feature API. `http://<host>:22023/api/health` must return `{"status":"ok","database":true}`. The team competency API must return JSON, not the frontend HTML fallback:
+
+```bash
+ECHOTUNE_BASE_URL=http://<host>:22023 npm run deploy:verify-team-competency
+```
+
+If `deploy:verify-team-competency` reports non-JSON content for `/api/team-competency/...`, the app is still running an older container image even if `/api/health` is green.
 
 ## Environment
 
@@ -65,12 +71,8 @@ After deployment, verify `http://<host>:22023/api/health`. A healthy deployment 
 - The app boot fails fast if Postgres is unavailable or schema bootstrap cannot complete.
 - API requests fail instead of hanging indefinitely when Postgres cannot be reached.
 - Postgres data persists in the Docker volume `echotune_postgres`.
-- GitHub App based Dokploy auto deploy is configured for the `main` branch.
-- Deployment verification note: GitHub App trigger is expected for new commits on `main`.
-- Verification marker: post-GitHub-App save test commit.
-- Verification marker: post-provider-save push test.
-- Verification marker: app-gh clean service trigger test.
-- Verification marker: final app-gh push trigger test.
+- Dokploy deployment must be verified after every `main` push. Do not treat GitHub push success as production deploy success.
+- If Dokploy auto deploy is not configured, use the Dokploy dashboard or API to redeploy the Compose app, then run `npm run deploy:verify-team-competency` against the production host.
 
 ## Backup and recovery
 

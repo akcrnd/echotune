@@ -39,6 +39,11 @@ npm run db:migrate-data
 
 3. Redeploy the app with Postgres enabled.
 4. Verify `GET /api/health` returns `200`.
+5. Verify newly deployed feature APIs return JSON instead of the SPA fallback:
+
+```bash
+ECHOTUNE_BASE_URL=http://<host>:22023 npm run deploy:verify-team-competency
+```
 
 ## Post-cutover validation
 
@@ -46,6 +51,7 @@ npm run db:migrate-data
 2. Check 3 representative employee profiles.
 3. Exercise create/update/delete for training, certification, patent, publication, award, and project.
 4. Confirm R&D criteria endpoints still return stored settings.
+5. Confirm `팀 적격성 관리` can load `선행연구개발팀` and that all four tabs show data.
 
 ## Rollback
 

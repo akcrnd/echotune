@@ -66,7 +66,7 @@ After field review, the module must not behave like a blank workbook editor.
 - Score matrices are generated from the current team roster and requirement list.
 - Score saves are roster-governed: the API ignores non-team score rows, writes employee names from the employee table, and rejects scores outside the 0-5 range.
 - Qualification tabs show evidence gaps when certification, skill, language, and training records are not yet registered.
-- Organization order follows the org chart hierarchy; manual row ordering belongs in the org chart/personnel domain, not this report.
+- Organization order follows the org chart hierarchy: `manager_id` builds the parent-child tree first, then siblings under the same manager follow org chart order/name fallback. Manual row ordering belongs in the org chart/personnel domain, not this report.
 
 ## Verification
 

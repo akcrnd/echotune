@@ -71,6 +71,106 @@ function toIntegerOrDefault(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
 }
 
+const DEFAULT_TEAM_WORK_CATEGORIES = [
+  {
+    categoryNo: "1",
+    categoryName: "ALV General & 품질",
+    majorFunctions: "1. ALV General tool 사용\n2. ALV System의 이해 및 습득\n3. 품질 시스템의 이행 및 습득",
+    controlItems: "1. PLM/DVM/Matrix\n2. ALV Regulation, ISO/TS Training\n3. APS\n4. Project 일정 관리\n5. Project 예산 관리\n6. OA 기기 활용",
+  },
+  {
+    categoryNo: "2",
+    categoryName: "Product Design",
+    majorFunctions: "1. ALV Product(Airbag & Seatbelt)의 지식 습득\n2. ALV Product의 기술 동향 이해\n3. APDS application",
+    controlItems: "1. Design training\n2. Product line training\n3. APDS capability\n4. PLM using capability",
+  },
+  {
+    categoryNo: "3",
+    categoryName: "Crash Performance",
+    majorFunctions: "1. Frontal crash\n2. Lateral crash\n3. Occupant protection\n4. Injury performance approaching",
+    controlItems: "1. 각 지역별 충돌 법규 숙지\n2. 차량 충돌 시스템의 이해\n3. Crash analysis tool 사용 능력(Diadem/TEMA 등)",
+  },
+  {
+    categoryNo: "4",
+    categoryName: "Test",
+    majorFunctions: "1. 개발 시험(CV & DV) 시험 능력 확보\n2. 시험 방법의 이해 및 지식 습득\n3. 시험 장비의 사용 및 운영\n4. 각 시험 스펙의 숙지 및 이해",
+    controlItems: "1. 시험 스펙의 지식 습득\n2. 시험 설비 사용 능력\n3. 시험 방법 개발 능력\n4. Crash analysis tool 사용 능력(Diadem/TEMA 등)",
+  },
+  {
+    categoryNo: "5",
+    categoryName: "CAE",
+    majorFunctions: "1. CAE tool 사용 능력 확보\n- Hyperview/LS-DYNA/MADYMO\n2. CAE matrix 구성",
+    controlItems: "1. CAE tool 사용 능력\n- Hyperview/LS-DYNA/MADYMO\n2. 실험계획법",
+  },
+];
+
+const DEFAULT_TEAM_COMPETENCY_REQUIREMENTS = [
+  ["1", "ALV General & 품질", "1", "ALV General tool", "이공계", "무관", "12개월", "24개월", "사내교육\n(PLM/DVM/Matrix)", "영어(B)", "5", "4", "3", "3"],
+  ["1", "ALV General & 품질", "2", "ALV System", "이공계", "무관", "6개월", "12개월", "사내교육\n(ALV Regulation, ISO/TS Training)", "영어(B)", "5", "4", "N/A", "4"],
+  ["1", "ALV General & 품질", "3", "품질 시스템", "이공계", "무관", "6개월", "12개월", "사내/사외교육\n(품질관리기초, AS4)", "영어(B)", "5", "4", "3", "3"],
+  ["2", "Product Design", "1", "ALV Product(Airbag & Seatbelt)", "이공계", "무관", "12개월", "24개월", "사내교육\n(Design Standard)", "영어(B)", "N/A", "5", "3", "3"],
+  ["2", "Product Design", "2", "APDS", "이공계", "무관", "12개월", "24개월", "사내교육\n(Design Standard)", "영어(B)", "4", "4", "3", "3"],
+  ["2", "Product Design", "3", "Product application", "이공계", "무관", "12개월", "24개월", "사내교육\n(Design Standard)", "영어(B)", "4", "4", "3", "3"],
+  ["2", "Product Design", "4", "Roadmap", "이공계", "무관", "6개월", "12개월", "사내교육\n(Design Standard)", "영어(B)", "4", "4", "3", "3"],
+  ["3", "Crash Performance", "1", "Frontal Crash", "이공계", "무관", "12개월", "24개월", "사내교육\n(차량 충돌 시스템의 이해)", "영어(B)", "4", "4", "3", "3"],
+  ["3", "Crash Performance", "2", "Lateral Crash", "이공계", "무관", "12개월", "24개월", "사내교육\n(차량 충돌 시스템의 이해)", "영어(B)", "4", "4", "3", "3"],
+  ["3", "Crash Performance", "3", "Occupant protection", "이공계", "무관", "12개월", "24개월", "사내교육\n(차량 충돌 시스템의 이해)", "영어(B)", "4", "4", "3", "3"],
+  ["3", "Crash Performance", "4", "Injury performance approaching", "이공계", "무관", "6개월", "12개월", "사내교육\n(차량 충돌 시스템의 이해)", "영어(B)", "4", "4", "3", "3"],
+  ["4", "Test", "1", "개발 시험(CV & DV) 시험 능력 확보", "이공계", "무관", "6개월", "12개월", "사내/사외교육\n(기초 기술교육)", "영어(B)", "4", "3", "2", "2"],
+  ["4", "Test", "2", "시험 방법의 이해 및 지식 습득", "이공계", "무관", "6개월", "12개월", "사내/사외교육\n(기초 기술교육)", "영어(B)", "4", "3", "2", "2"],
+  ["4", "Test", "3", "시험 장비의 사용 및 운영", "이공계", "무관", "6개월", "12개월", "사내/사외교육\n(시험설비 운영교육)", "영어(B)", "4", "3", "2", "2"],
+  ["4", "Test", "4", "각 시험 스펙의 숙지 및 이해", "이공계", "무관", "6개월", "12개월", "사내교육\n(고객규격 & 고객 요구교육)", "영어(B)", "4", "3", "2", "2"],
+  ["5", "CAE", "1", "CAE tool", "이공계", "무관", "6개월", "12개월", "사내/외교육\n(CAE Tool)", "무관", "4", "3", "2", "2"],
+  ["5", "CAE", "2", "CAE matrix 구성", "이공계", "무관", "6개월", "6개월", "사내교육\n(Design Standard & Test)", "무관", "3", "3", "2", "2"],
+].map(([
+  majorNo,
+  majorName,
+  subNo,
+  subName,
+  requiredMajor,
+  requiredCertification,
+  minKnowledge,
+  proficiencyPeriod,
+  requiredTraining,
+  languageRequirement,
+  deptHeadLevel,
+  managerLevel,
+  staffLevel,
+  minimumLevel,
+]) => ({
+  majorNo,
+  majorName,
+  subNo,
+  subName,
+  requiredMajor,
+  requiredCertification,
+  minKnowledge,
+  proficiencyPeriod,
+  requiredTraining,
+  languageRequirement,
+  deptHeadLevel,
+  managerLevel,
+  staffLevel,
+  minimumLevel,
+}));
+
+const DEFAULT_TEAM_REQUIRED_QUALIFICATIONS = [
+  {
+    itemNo: "1",
+    requirementItem: "시험요원 자격부여",
+    requirementName: "OJT 수료 및 적격성 평가 항목(전공, 교육, 경력, 숙련도) 만족",
+    requiredGrade: "70점 이상",
+    plan: "직원별 자격/교육/평가 증빙 등록 필요",
+  },
+  {
+    itemNo: "2",
+    requirementItem: "6 Sigma",
+    requirementName: "6 Sigma",
+    requiredGrade: "Green belt",
+    plan: "보유자 자격 이력 등록 필요",
+  },
+];
+
 function rowTeamCompetencyReport(row: any) {
   return {
     id: row.id,
@@ -171,10 +271,199 @@ function rowTeamRequiredQualification(row: any) {
   };
 }
 
+async function getOrderedTeamMembers(teamCode: string, teamName: string, queryRunner: any = pool) {
+  const result = await queryRunner.query(
+    `
+      SELECT e.id, e.employee_number, e.name, e.position, e.department, e.team,
+             e.department_code, e.team_code, e.manager_id, e.is_active,
+             manager.name AS manager_name
+      FROM employees e
+      LEFT JOIN employees manager ON manager.id = e.manager_id
+      WHERE e.is_active IS DISTINCT FROM FALSE
+        AND (e.team_code = $1 OR e.team = $2)
+      ORDER BY e.name
+    `,
+    [teamCode, teamName],
+  );
+
+  const positionRank = (position: string | null) => {
+    const text = position ?? "";
+    if (text.includes("그룹장") || text.includes("부문장")) return 100;
+    if (text.includes("팀장")) return 90;
+    if (text.includes("책임")) return 70;
+    if (text.includes("수석")) return 60;
+    if (text.includes("매니저")) return 50;
+    return 10;
+  };
+
+  const rows = result.rows;
+  const byId = new Map(rows.map((row: any) => [row.id, row]));
+  const childrenByManager = new Map<string, any[]>();
+
+  for (const row of rows) {
+    if (row.manager_id && byId.has(row.manager_id)) {
+      const children = childrenByManager.get(row.manager_id) ?? [];
+      children.push(row);
+      childrenByManager.set(row.manager_id, children);
+    }
+  }
+
+  const sortRows = (items: any[]) =>
+    [...items].sort((a, b) => {
+      const rankDiff = positionRank(b.position) - positionRank(a.position);
+      if (rankDiff !== 0) return rankDiff;
+      return String(a.name).localeCompare(String(b.name), "ko");
+    });
+
+  const roots = sortRows(rows.filter((row: any) => !row.manager_id || !byId.has(row.manager_id)));
+  const ordered: any[] = [];
+  const seen = new Set<string>();
+
+  const visit = (row: any, depth: number) => {
+    if (seen.has(row.id)) return;
+    seen.add(row.id);
+    ordered.push({ ...row, org_order: ordered.length, org_depth: depth });
+    for (const child of sortRows(childrenByManager.get(row.id) ?? [])) {
+      visit(child, depth + 1);
+    }
+  };
+
+  for (const root of roots) visit(root, 0);
+  for (const row of sortRows(rows.filter((item: any) => !seen.has(item.id)))) {
+    visit(row, 0);
+  }
+
+  return ordered;
+}
+
+async function ensureTeamCompetencyDefaults(reportRow: any) {
+  const reportId = reportRow.id;
+  const members = await getOrderedTeamMembers(reportRow.team_code, reportRow.team_name);
+  const memberIds = members.map((member: any) => member.id);
+
+  if (memberIds.length > 0) {
+    await pool.query(
+      `
+        DELETE FROM team_role_assignments
+        WHERE report_id = $1
+          AND employee_id IS NOT NULL
+          AND NOT (employee_id = ANY($2::varchar[]))
+      `,
+      [reportId, memberIds],
+    );
+  }
+
+  for (const member of members) {
+    const updateResult = await pool.query(
+      `
+        UPDATE team_role_assignments
+        SET role_group = $3,
+            employee_name = $4,
+            position_title = $5,
+            display_order = $6,
+            updated_at = NOW()
+        WHERE report_id = $1 AND employee_id = $2
+      `,
+      [reportId, member.id, reportRow.team_name, member.name, member.position, member.org_order],
+    );
+
+    if (updateResult.rowCount === 0) {
+      await pool.query(
+        `
+          INSERT INTO team_role_assignments
+            (report_id, role_group, employee_id, employee_name, position_title, responsibilities, display_order)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `,
+        [reportId, reportRow.team_name, member.id, member.name, member.position, "", member.org_order],
+      );
+    }
+  }
+
+  const categoryCount = await pool.query("SELECT COUNT(*)::int AS count FROM team_work_categories WHERE report_id = $1", [reportId]);
+  if (categoryCount.rows[0]?.count === 0) {
+    for (let index = 0; index < DEFAULT_TEAM_WORK_CATEGORIES.length; index += 1) {
+      const row = DEFAULT_TEAM_WORK_CATEGORIES[index];
+      await pool.query(
+        `
+          INSERT INTO team_work_categories
+            (report_id, category_no, category_name, major_functions, control_items, display_order)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `,
+        [reportId, row.categoryNo, row.categoryName, row.majorFunctions, row.controlItems, index],
+      );
+    }
+  }
+
+  const requirementCount = await pool.query("SELECT COUNT(*)::int AS count FROM team_competency_requirements WHERE report_id = $1", [reportId]);
+  if (requirementCount.rows[0]?.count === 0) {
+    for (let index = 0; index < DEFAULT_TEAM_COMPETENCY_REQUIREMENTS.length; index += 1) {
+      const row = DEFAULT_TEAM_COMPETENCY_REQUIREMENTS[index];
+      await pool.query(
+        `
+          INSERT INTO team_competency_requirements
+            (report_id, major_no, major_name, sub_no, sub_name, required_major, required_certification,
+             min_knowledge, proficiency_period, required_training, language_requirement,
+             dept_head_level, manager_level, staff_level, minimum_level, display_order)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        `,
+        [
+          reportId,
+          row.majorNo,
+          row.majorName,
+          row.subNo,
+          row.subName,
+          row.requiredMajor,
+          row.requiredCertification,
+          row.minKnowledge,
+          row.proficiencyPeriod,
+          row.requiredTraining,
+          row.languageRequirement,
+          row.deptHeadLevel,
+          row.managerLevel,
+          row.staffLevel,
+          row.minimumLevel,
+          index,
+        ],
+      );
+    }
+  }
+
+  const requirements = await pool.query("SELECT id FROM team_competency_requirements WHERE report_id = $1", [reportId]);
+  for (const requirement of requirements.rows) {
+    for (const member of members) {
+      await pool.query(
+        `
+          INSERT INTO team_competency_scores (requirement_id, employee_id, employee_name, score)
+          VALUES ($1, $2, $3, NULL)
+          ON CONFLICT (requirement_id, employee_id)
+          DO UPDATE SET employee_name = EXCLUDED.employee_name, updated_at = NOW()
+        `,
+        [requirement.id, member.id, member.name],
+      );
+    }
+  }
+
+  const qualificationCount = await pool.query("SELECT COUNT(*)::int AS count FROM team_required_qualifications WHERE report_id = $1", [reportId]);
+  if (qualificationCount.rows[0]?.count === 0) {
+    for (let index = 0; index < DEFAULT_TEAM_REQUIRED_QUALIFICATIONS.length; index += 1) {
+      const row = DEFAULT_TEAM_REQUIRED_QUALIFICATIONS[index];
+      await pool.query(
+        `
+          INSERT INTO team_required_qualifications
+            (report_id, item_no, requirement_item, requirement_name, required_grade, plan, display_order)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `,
+        [reportId, row.itemNo, row.requirementItem, row.requirementName, row.requiredGrade, row.plan, index],
+      );
+    }
+  }
+}
+
 async function loadTeamCompetencyDetail(reportId: string) {
   const reportResult = await pool.query("SELECT * FROM team_competency_reports WHERE id = $1", [reportId]);
   const reportRow = reportResult.rows[0];
   if (!reportRow) return null;
+  await ensureTeamCompetencyDefaults(reportRow);
 
   const [assignmentsResult, categoriesResult, requirementsResult, scoresResult, qualificationsResult, membersResult] =
     await Promise.all([
@@ -190,14 +479,7 @@ async function loadTeamCompetencyDetail(reportId: string) {
         [reportId],
       ),
       pool.query("SELECT * FROM team_required_qualifications WHERE report_id = $1 ORDER BY display_order, created_at", [reportId]),
-      pool.query(
-        `SELECT id, employee_number, name, position, department, team, department_code, team_code, is_active
-         FROM employees
-         WHERE is_active IS DISTINCT FROM FALSE
-           AND (team_code = $1 OR team = $2)
-         ORDER BY name`,
-        [reportRow.team_code, reportRow.team_name],
-      ),
+      getOrderedTeamMembers(reportRow.team_code, reportRow.team_name),
     ]);
 
   const requirements = requirementsResult.rows.map(rowTeamCompetencyRequirement);
@@ -208,9 +490,30 @@ async function loadTeamCompetencyDetail(reportId: string) {
     if (requirement) requirement.scores.push(score);
   }
 
+  const memberIds = membersResult.map((row: any) => row.id);
+  const evidenceResult = memberIds.length
+    ? await pool.query(
+        `
+          SELECT e.id AS employee_id,
+                 COUNT(DISTINCT c.id)::int AS certifications,
+                 COUNT(DISTINCT s.id)::int AS skills,
+                 COUNT(DISTINCT l.id)::int AS languages,
+                 COUNT(DISTINCT t.id)::int AS trainings
+          FROM employees e
+          LEFT JOIN certifications c ON c.employee_id = e.id AND c.is_active IS DISTINCT FROM FALSE
+          LEFT JOIN skills s ON s.employee_id = e.id AND s.is_active IS DISTINCT FROM FALSE
+          LEFT JOIN languages l ON l.employee_id = e.id AND l.is_active IS DISTINCT FROM FALSE
+          LEFT JOIN training_history t ON t.employee_id = e.id
+          WHERE e.id = ANY($1::varchar[])
+          GROUP BY e.id
+        `,
+        [memberIds],
+      )
+    : { rows: [] };
+
   return {
     report: rowTeamCompetencyReport(reportRow),
-    teamMembers: membersResult.rows.map((row) => ({
+    teamMembers: membersResult.map((row: any) => ({
       id: row.id,
       employeeNumber: row.employee_number,
       name: row.name,
@@ -219,7 +522,18 @@ async function loadTeamCompetencyDetail(reportId: string) {
       team: row.team,
       departmentCode: row.department_code,
       teamCode: row.team_code,
+      managerId: row.manager_id,
+      managerName: row.manager_name,
+      orgOrder: row.org_order,
+      orgDepth: row.org_depth,
       isActive: row.is_active,
+    })),
+    memberEvidence: evidenceResult.rows.map((row: any) => ({
+      employeeId: row.employee_id,
+      certifications: row.certifications,
+      skills: row.skills,
+      languages: row.languages,
+      trainings: row.trainings,
     })),
     assignments: assignmentsResult.rows.map(rowTeamRoleAssignment),
     workCategories: categoriesResult.rows.map(rowTeamWorkCategory),

@@ -23,6 +23,10 @@ type TeamMember = {
   position: string;
   team: string | null;
   teamCode: string | null;
+  managerId?: string | null;
+  managerName?: string | null;
+  orgDepth?: number;
+  orgOrder?: number;
 };
 
 type Report = {
@@ -107,10 +111,19 @@ type Qualification = {
 type TeamCompetencyDetail = {
   report: Report;
   teamMembers: TeamMember[];
+  memberEvidence?: MemberEvidence[];
   assignments: Assignment[];
   workCategories: WorkCategory[];
   requirements: Requirement[];
   qualifications: Qualification[];
+};
+
+type MemberEvidence = {
+  employeeId: string;
+  certifications: number;
+  skills: number;
+  languages: number;
+  trainings: number;
 };
 
 const currentYear = new Date().getFullYear();
@@ -285,6 +298,7 @@ export default function TeamCompetency() {
     if (!detail) return { entered: 0, total: 0, average: 0 };
     const scores = detail.requirements.flatMap((requirement) => requirement.scores ?? []);
     const numericScores = scores
+      .filter((score) => score.score !== null && score.score !== undefined && score.score !== "")
       .map((score) => Number(score.score))
       .filter((score) => Number.isFinite(score));
     const total = detail.requirements.length * detail.teamMembers.length;
@@ -292,6 +306,32 @@ export default function TeamCompetency() {
       ? numericScores.reduce((sum, score) => sum + score, 0) / numericScores.length
       : 0;
     return { entered: numericScores.length, total, average };
+  }, [detail]);
+
+  const evidenceStats = useMemo(() => {
+    const rows = detail?.memberEvidence ?? [];
+    return rows.reduce(
+      (summary, row) => ({
+        certifications: summary.certifications + row.certifications,
+        skills: summary.skills + row.skills,
+        languages: summary.languages + row.languages,
+        trainings: summary.trainings + row.trainings,
+      }),
+      { certifications: 0, skills: 0, languages: 0, trainings: 0 },
+    );
+  }, [detail]);
+
+  const teamMembersById = useMemo(() => {
+    const map = new Map<string, TeamMember>();
+    for (const member of detail?.teamMembers ?? []) map.set(member.id, member);
+    return map;
+  }, [detail]);
+
+  const sortedAssignments = useMemo(() => {
+    if (!detail) return [];
+    return detail.assignments
+      .map((assignment, index) => ({ ...assignment, originalIndex: index }))
+      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
   }, [detail]);
 
   const updateReport = (field: keyof Report, value: string) => {
@@ -543,12 +583,14 @@ export default function TeamCompetency() {
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center text-sm font-medium">
                   <Award className="mr-2 h-4 w-4 text-muted-foreground" />
-                  요구자격
+                  요구자격/증빙
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{detail.qualifications.length}</div>
-                <p className="text-xs text-muted-foreground">법적/회사 요구자격</p>
+                <p className="text-xs text-muted-foreground">
+                  증빙 {evidenceStats.certifications + evidenceStats.skills + evidenceStats.languages + evidenceStats.trainings}건
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -580,47 +622,49 @@ export default function TeamCompetency() {
             <TabsContent value="organization" className="space-y-3">
               <div className="flex items-center justify-between">
                 <Badge variant="outline">{detail.report.teamName} / {detail.report.evaluationYear}</Badge>
-                <Button variant="outline" size="sm" onClick={addAssignment}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  행 추가
-                </Button>
+                <Badge variant="secondary">조직도 기준 자동 정렬</Badge>
               </div>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>역할그룹</TableHead>
+                    <TableHead className="w-[80px]">순서</TableHead>
                     <TableHead>팀원</TableHead>
-                    <TableHead>직급/역할</TableHead>
+                    <TableHead>직급</TableHead>
+                    <TableHead>상위자</TableHead>
                     <TableHead>담당 업무</TableHead>
                     <TableHead>업무대리인</TableHead>
-                    <TableHead className="w-[60px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detail.assignments.map((row, index) => (
-                    <TableRow key={row.id ?? index}>
+                  {sortedAssignments.map((row) => {
+                    const member = row.employeeId ? teamMembersById.get(row.employeeId) : undefined;
+                    const rowIndex = row.originalIndex;
+                    return (
+                    <TableRow key={row.id ?? rowIndex}>
                       <TableCell>
-                        <TextCell value={row.roleGroup} onChange={(value) => updateArrayRow<Assignment>("assignments", index, { roleGroup: value })} />
+                        <span className="text-sm text-muted-foreground">{(row.displayOrder ?? rowIndex) + 1}</span>
                       </TableCell>
                       <TableCell>
-                        <TextCell value={row.employeeName} onChange={(value) => updateArrayRow<Assignment>("assignments", index, { employeeName: value })} />
+                        <div className="space-y-1" style={{ paddingLeft: `${(member?.orgDepth ?? 0) * 18}px` }}>
+                          <div className="font-medium">{member?.name ?? row.employeeName ?? "-"}</div>
+                          <div className="text-xs text-muted-foreground">{member?.employeeNumber ?? "조직도 미연동"}</div>
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <TextCell value={row.positionTitle} onChange={(value) => updateArrayRow<Assignment>("assignments", index, { positionTitle: value })} />
+                        <Badge variant="outline">{member?.position ?? row.positionTitle ?? "-"}</Badge>
                       </TableCell>
                       <TableCell>
-                        <TextAreaCell value={row.responsibilities} onChange={(value) => updateArrayRow<Assignment>("assignments", index, { responsibilities: value })} />
+                        <span className="text-sm text-muted-foreground">{member?.managerName ?? "-"}</span>
                       </TableCell>
                       <TableCell>
-                        <TextCell value={row.deputyName} onChange={(value) => updateArrayRow<Assignment>("assignments", index, { deputyName: value })} />
+                        <TextAreaCell value={row.responsibilities} onChange={(value) => updateArrayRow<Assignment>("assignments", rowIndex, { responsibilities: value })} />
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("assignments", index)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <TextCell value={row.deputyName} onChange={(value) => updateArrayRow<Assignment>("assignments", rowIndex, { deputyName: value })} />
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </TabsContent>
@@ -759,7 +803,16 @@ export default function TeamCompetency() {
             </TabsContent>
 
             <TabsContent value="qualifications" className="space-y-3">
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <Badge variant="outline">자격 {evidenceStats.certifications}건</Badge>
+                  <Badge variant="outline">스킬 {evidenceStats.skills}건</Badge>
+                  <Badge variant="outline">언어 {evidenceStats.languages}건</Badge>
+                  <Badge variant="outline">교육 {evidenceStats.trainings}건</Badge>
+                  {evidenceStats.certifications + evidenceStats.skills + evidenceStats.languages + evidenceStats.trainings === 0 && (
+                    <Badge variant="secondary">직원 증빙 데이터 미입력</Badge>
+                  )}
+                </div>
                 <Button variant="outline" size="sm" onClick={addQualification}>
                   <Plus className="mr-2 h-4 w-4" />
                   자격 추가
@@ -795,6 +848,7 @@ export default function TeamCompetency() {
                       <TableCell>
                         <div className="space-y-2">
                           <TextAreaCell value={row.holderSummary} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { holderSummary: value })} placeholder="보유자 명" />
+                          {!row.holderSummary && <Badge variant="secondary">보유자 증빙 미입력</Badge>}
                           <TextCell value={row.heldQualification} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { heldQualification: value })} placeholder="해당자격명/등급" />
                         </div>
                       </TableCell>

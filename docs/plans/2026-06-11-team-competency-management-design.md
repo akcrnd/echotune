@@ -54,6 +54,17 @@ This makes inline editing simple and avoids partial-save drift between related s
 - Keep controls predictable: team/year selectors, tabs, add-row buttons, save button.
 - Show missing data as actionable empty states rather than blank sheets.
 
+## Enterprise Rework Rules
+
+After field review, the module must not behave like a blank workbook editor.
+
+- Employee name, employee number, position, manager, and organization order come from `employees.manager_id` and are read-only here.
+- Team competency can edit responsibility assignments, deputies, competency criteria, scores, qualification plans, and remarks.
+- Existing or newly created reports are auto-repaired with the reference competency template when key sections are empty.
+- Score matrices are generated from the current team roster and requirement list.
+- Qualification tabs show evidence gaps when certification, skill, language, and training records are not yet registered.
+- Organization order follows the org chart hierarchy; manual row ordering belongs in the org chart/personnel domain, not this report.
+
 ## Verification
 
 Minimum verification:

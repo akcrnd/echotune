@@ -66,6 +66,19 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseCompetencyScore(value: unknown): { isValid: boolean; score: number | null } {
+  if (value === undefined || value === null || value === "") {
+    return { isValid: true, score: null };
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 5) {
+    return { isValid: false, score: null };
+  }
+
+  return { isValid: true, score: Math.round(parsed * 2) / 2 };
+}
+
 function toIntegerOrDefault(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
@@ -2316,6 +2329,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const reportRow = reportResult.rows[0];
       const members = await getOrderedTeamMembers(reportRow.team_code, reportRow.team_name, client);
+      const membersById = new Map(members.map((member: any) => [member.id, member]));
       type EditableAssignmentFields = {
         responsibilities?: unknown;
         deputyEmployeeId?: unknown;
@@ -2456,7 +2470,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const requirementId = requirementResult.rows[0].id;
         const scores = Array.isArray(row.scores) ? row.scores : [];
+        const scoresByEmployeeId = new Map<string, any>();
         for (const scoreRow of scores) {
+          const employeeId = toNullableString(scoreRow.employeeId);
+          if (employeeId && membersById.has(employeeId)) {
+            scoresByEmployeeId.set(employeeId, scoreRow);
+          }
+        }
+
+        for (const member of members) {
+          const scoreRow = scoresByEmployeeId.get(member.id) ?? {};
+          const parsedScore = parseCompetencyScore(scoreRow.score);
+          if (!parsedScore.isValid) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ error: "평가 점수는 0점부터 5점 사이로 입력해야 합니다." });
+          }
+
           await client.query(
             `
               INSERT INTO team_competency_scores
@@ -2465,9 +2494,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             `,
             [
               requirementId,
-              toNullableString(scoreRow.employeeId),
-              toNullableString(scoreRow.employeeName),
-              toNullableNumber(scoreRow.score),
+              member.id,
+              member.name,
+              parsedScore.score,
               toNullableString(scoreRow.notes),
             ],
           );

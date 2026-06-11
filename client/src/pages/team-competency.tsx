@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Award, BriefcaseBusiness, ClipboardCheck, Plus, Save, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Award, BriefcaseBusiness, CheckCircle2, ClipboardCheck, Plus, Save, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -147,6 +148,15 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
 function makeLocalId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function hasText(value?: string | number | null) {
+  return String(value ?? "").trim().length > 0;
+}
+
+function percentValue(done: number, total: number) {
+  if (total <= 0) return 0;
+  return Math.round((done / total) * 100);
 }
 
 function TextCell({
@@ -326,6 +336,7 @@ export default function TeamCompetency() {
       { certifications: 0, skills: 0, languages: 0, trainings: 0 },
     );
   }, [detail]);
+  const evidenceTotal = evidenceStats.certifications + evidenceStats.skills + evidenceStats.languages + evidenceStats.trainings;
 
   const teamMembersById = useMemo(() => {
     const map = new Map<string, TeamMember>();
@@ -333,12 +344,53 @@ export default function TeamCompetency() {
     return map;
   }, [detail]);
 
+  const memberEvidenceById = useMemo(() => {
+    const map = new Map<string, MemberEvidence>();
+    for (const row of detail?.memberEvidence ?? []) map.set(row.employeeId, row);
+    return map;
+  }, [detail]);
+
+  const evidenceTotalForMember = (memberId?: string | null) => {
+    if (!memberId) return 0;
+    const row = memberEvidenceById.get(memberId);
+    return row ? row.certifications + row.skills + row.languages + row.trainings : 0;
+  };
+
   const sortedAssignments = useMemo(() => {
     if (!detail) return [];
     return detail.assignments
       .map((assignment, index) => ({ ...assignment, originalIndex: index }))
       .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
   }, [detail]);
+
+  const operationalStats = useMemo(() => {
+    if (!detail) return null;
+    const missingResponsibilities = detail.assignments.filter((row) => !hasText(row.responsibilities)).length;
+    const missingQualificationHolders = detail.qualifications.filter((row) => !hasText(row.holderSummary)).length;
+    const missingQualificationPlans = detail.qualifications.filter((row) => !hasText(row.plan)).length;
+    const missingScores = Math.max(scoreStats.total - scoreStats.entered, 0);
+    const templateReady = detail.workCategories.length > 0 && detail.requirements.length > 0 && detail.qualifications.length > 0;
+    const checks = [
+      detail.teamMembers.length > 0,
+      templateReady,
+      missingResponsibilities === 0,
+      scoreStats.total > 0 && missingScores === 0,
+      detail.qualifications.length > 0 && missingQualificationHolders === 0,
+      evidenceTotal > 0,
+    ];
+    const readinessPercent = percentValue(checks.filter(Boolean).length, checks.length);
+    const statusLabel = readinessPercent >= 85 ? "검토 가능" : readinessPercent >= 50 ? "보완 진행" : "초기 정비";
+
+    return {
+      missingResponsibilities,
+      missingQualificationHolders,
+      missingQualificationPlans,
+      missingScores,
+      templateReady,
+      readinessPercent,
+      statusLabel,
+    };
+  }, [detail, evidenceTotal, scoreStats.entered, scoreStats.total]);
 
   const updateReport = (field: keyof Report, value: string) => {
     setDetail((current) =>
@@ -372,28 +424,6 @@ export default function TeamCompetency() {
         [key]: (current[key] as any[]).filter((_, rowIndex) => rowIndex !== index),
       };
     });
-  };
-
-  const addAssignment = () => {
-    setDetail((current) =>
-      current
-        ? {
-            ...current,
-            assignments: [
-              ...current.assignments,
-              {
-                id: makeLocalId("assignment"),
-                roleGroup: current.report.teamName,
-                employeeName: "",
-                positionTitle: "",
-                responsibilities: "",
-                deputyName: "",
-                displayOrder: current.assignments.length,
-              },
-            ],
-          }
-        : current,
-    );
   };
 
   const addWorkCategory = () => {
@@ -602,11 +632,86 @@ export default function TeamCompetency() {
               <CardContent>
                 <div className="text-2xl font-bold">{detail.qualifications.length}</div>
                 <p className="text-xs text-muted-foreground">
-                  증빙 {evidenceStats.certifications + evidenceStats.skills + evidenceStats.languages + evidenceStats.trainings}건
+                  증빙 {evidenceTotal}건
                 </p>
               </CardContent>
             </Card>
           </div>
+
+          {operationalStats && (
+            <Card className="border-slate-200">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center justify-between gap-3 text-base">
+                  <span className="flex items-center">
+                    <ShieldCheck className="mr-2 h-4 w-4 text-muted-foreground" />
+                    운영 점검
+                  </span>
+                  <Badge variant={operationalStats.readinessPercent >= 85 ? "default" : "secondary"}>
+                    {operationalStats.statusLabel}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-2xl font-bold">{operationalStats.readinessPercent}%</div>
+                    <p className="text-xs text-muted-foreground">조직 연동, 템플릿, 평가, 자격 증빙 기준</p>
+                  </div>
+                  <Progress value={operationalStats.readinessPercent} className="h-2 sm:max-w-sm" />
+                </div>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      조직도 연동
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {detail.teamMembers.length}명 / 조직도 순서 기준
+                    </p>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      {operationalStats.missingResponsibilities === 0 ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      )}
+                      담당업무
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      미입력 {operationalStats.missingResponsibilities}건
+                    </p>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      {operationalStats.missingScores === 0 ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      )}
+                      평가 매트릭스
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      미평가 {operationalStats.missingScores}칸
+                    </p>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      {operationalStats.missingQualificationHolders === 0 && evidenceTotal > 0 ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      )}
+                      자격/증빙
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      보유자 미입력 {operationalStats.missingQualificationHolders}건 · 직원 증빙 {evidenceTotal}건
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
             <TextCell disabled={isReportLocked} value={detail.report.revision} onChange={(value) => updateReport("revision", value)} placeholder="Rev.00" />
@@ -636,7 +741,12 @@ export default function TeamCompetency() {
             <TabsContent value="organization" className="space-y-3">
               <div className="flex items-center justify-between">
                 <Badge variant="outline">{detail.report.teamName} / {detail.report.evaluationYear}</Badge>
-                <Badge variant="secondary">조직도 기준 자동 정렬</Badge>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Badge variant="secondary">조직도 기준 자동 정렬</Badge>
+                  {operationalStats && operationalStats.missingResponsibilities > 0 && (
+                    <Badge variant="outline">담당업무 미입력 {operationalStats.missingResponsibilities}건</Badge>
+                  )}
+                </div>
               </div>
               <fieldset disabled={isReportLocked} className="contents">
               <Table>
@@ -663,6 +773,11 @@ export default function TeamCompetency() {
                         <div className="space-y-1" style={{ paddingLeft: `${(member?.orgDepth ?? 0) * 18}px` }}>
                           <div className="font-medium">{member?.name ?? row.employeeName ?? "-"}</div>
                           <div className="text-xs text-muted-foreground">{member?.employeeNumber ?? "조직도 미연동"}</div>
+                          {member && (
+                            <Badge variant={evidenceTotalForMember(member.id) > 0 ? "outline" : "secondary"} className="text-[11px]">
+                              증빙 {evidenceTotalForMember(member.id)}건
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -686,7 +801,11 @@ export default function TeamCompetency() {
             </TabsContent>
 
             <TabsContent value="work" className="space-y-3">
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">업무분류 {detail.workCategories.length}개</Badge>
+                  <Badge variant={operationalStats?.templateReady ? "secondary" : "destructive"}>엑셀 기준 템플릿</Badge>
+                </div>
                 <Button variant="outline" size="sm" onClick={addWorkCategory} disabled={isReportLocked}>
                   <Plus className="mr-2 h-4 w-4" />
                   업무 추가
@@ -730,7 +849,7 @@ export default function TeamCompetency() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("workCategories", index)}>
+                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("workCategories", index)} disabled={isReportLocked}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -742,7 +861,14 @@ export default function TeamCompetency() {
             </TabsContent>
 
             <TabsContent value="requirements" className="space-y-3">
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-[260px] flex-1 items-center gap-3">
+                  <Badge variant="outline">평가 {scoreStats.entered}/{scoreStats.total}</Badge>
+                  <Progress value={percentValue(scoreStats.entered, scoreStats.total)} className="h-2 max-w-sm" />
+                  {operationalStats && operationalStats.missingScores > 0 && (
+                    <Badge variant="secondary">미평가 {operationalStats.missingScores}칸</Badge>
+                  )}
+                </div>
                 <Button variant="outline" size="sm" onClick={addRequirement} disabled={isReportLocked}>
                   <Plus className="mr-2 h-4 w-4" />
                   기준 추가
@@ -758,14 +884,21 @@ export default function TeamCompetency() {
                     <TableHead>직급별 기준</TableHead>
                     {detail.teamMembers.map((member) => (
                       <TableHead key={member.id} className="min-w-[96px] text-center">
-                        {member.name}
+                        <div className="space-y-1">
+                          <div>{member.name}</div>
+                          <div className="text-[11px] font-normal text-muted-foreground">
+                            증빙 {evidenceTotalForMember(member.id)}건
+                          </div>
+                        </div>
                       </TableHead>
                     ))}
                     <TableHead className="w-[60px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detail.requirements.map((row, index) => (
+                  {detail.requirements.map((row, index) => {
+                    const enteredForRow = detail.teamMembers.filter((member) => hasText(scoreFor(row, member.id))).length;
+                    return (
                     <TableRow key={row.id ?? index}>
                       <TableCell>
                         <div className="space-y-2">
@@ -777,6 +910,9 @@ export default function TeamCompetency() {
                         <div className="space-y-2">
                           <TextCell value={row.subNo} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subNo: value })} placeholder="No" className="w-20" />
                           <TextCell value={row.subName} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subName: value })} placeholder="업무명" />
+                          <Badge variant={enteredForRow === detail.teamMembers.length ? "secondary" : "outline"}>
+                            입력 {enteredForRow}/{detail.teamMembers.length}
+                          </Badge>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -799,24 +935,32 @@ export default function TeamCompetency() {
                       </TableCell>
                       {detail.teamMembers.map((member) => (
                         <TableCell key={member.id}>
+                          {(() => {
+                            const value = scoreFor(row, member.id);
+                            const isMissing = !hasText(value);
+                            return (
                           <Input
                             type="number"
                             min="0"
                             max="5"
                             step="0.5"
-                            value={scoreFor(row, member.id)}
+                            value={value}
                             onChange={(event) => updateScore(index, member, event.target.value)}
-                            className="w-20 text-center"
+                            disabled={isReportLocked}
+                            className={`w-20 text-center ${isMissing ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50/40"}`}
                           />
+                            );
+                          })()}
                         </TableCell>
                       ))}
                       <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("requirements", index)}>
+                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("requirements", index)} disabled={isReportLocked}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
               </fieldset>
@@ -829,7 +973,13 @@ export default function TeamCompetency() {
                   <Badge variant="outline">스킬 {evidenceStats.skills}건</Badge>
                   <Badge variant="outline">언어 {evidenceStats.languages}건</Badge>
                   <Badge variant="outline">교육 {evidenceStats.trainings}건</Badge>
-                  {evidenceStats.certifications + evidenceStats.skills + evidenceStats.languages + evidenceStats.trainings === 0 && (
+                  {operationalStats && operationalStats.missingQualificationHolders > 0 && (
+                    <Badge variant="secondary">보유자 미입력 {operationalStats.missingQualificationHolders}건</Badge>
+                  )}
+                  {operationalStats && operationalStats.missingQualificationPlans > 0 && (
+                    <Badge variant="outline">계획 미입력 {operationalStats.missingQualificationPlans}건</Badge>
+                  )}
+                  {evidenceTotal === 0 && (
                     <Badge variant="secondary">직원 증빙 데이터 미입력</Badge>
                   )}
                 </div>
@@ -880,7 +1030,7 @@ export default function TeamCompetency() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("qualifications", index)}>
+                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("qualifications", index)} disabled={isReportLocked}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>

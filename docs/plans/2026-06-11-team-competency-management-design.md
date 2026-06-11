@@ -51,6 +51,7 @@ This makes inline editing simple and avoids partial-save drift between related s
 
 - Favor dense, spreadsheet-like tables where they help comparison.
 - Add summary cards for row counts, evaluated members, score completion, and qualification gaps.
+- Add an operational readiness panel above the tabs so managers can see responsibility gaps, evaluation gaps, qualification holder gaps, and evidence registration status before opening each table.
 - Keep controls predictable: team/year selectors, tabs, add-row buttons, save button.
 - Show missing data as actionable empty states rather than blank sheets.
 
@@ -62,6 +63,7 @@ After field review, the module must not behave like a blank workbook editor.
 - Team competency can edit responsibility assignments, deputies, competency criteria, scores, qualification plans, and remarks.
 - Existing or newly created reports are auto-repaired with the reference competency template when key sections are empty.
 - Score matrices are generated from the current team roster and requirement list.
+- Score saves are roster-governed: the API ignores non-team score rows, writes employee names from the employee table, and rejects scores outside the 0-5 range.
 - Qualification tabs show evidence gaps when certification, skill, language, and training records are not yet registered.
 - Organization order follows the org chart hierarchy; manual row ordering belongs in the org chart/personnel domain, not this report.
 

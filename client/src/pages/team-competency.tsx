@@ -422,7 +422,7 @@ export default function TeamCompetency() {
   const operationalStats = useMemo(() => {
     if (!detail) return null;
     const missingResponsibilities = detail.assignments.filter(
-      (row) => !hasText(row.roleTitle) || !hasText(row.responsibilities) || !hasText(row.jobDescription),
+      (row) => !hasText(row.roleTitle) || !hasText(row.responsibilities),
     ).length;
     const missingQualificationHolders = detail.qualifications.filter((row) => !hasText(row.holderSummary)).length;
     const missingQualificationPlans = detail.qualifications.filter((row) => !hasText(row.plan)).length;
@@ -627,15 +627,6 @@ export default function TeamCompetency() {
               className="min-h-[116px] resize-y rounded-sm border-slate-300 text-xs leading-relaxed"
             />
           </div>
-          <div>
-            <div className="mb-1 text-[11px] font-medium text-muted-foreground">상세 직무 기술</div>
-            <Textarea
-              value={row.jobDescription ?? ""}
-              onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { jobDescription: event.target.value })}
-              placeholder="직무 목적, 산출물, 협업 범위"
-              className="min-h-[72px] resize-y rounded-sm border-slate-300 text-xs leading-relaxed"
-            />
-          </div>
         </div>
         <div className="grid grid-cols-[82px_1fr] border-t border-slate-400 text-xs">
           <div className="border-r border-slate-400 bg-slate-50 px-2 py-1 font-medium">업무대리인</div>
@@ -654,18 +645,22 @@ export default function TeamCompetency() {
     );
   };
 
-  const renderOrgAssignmentNode = (node: OrgAssignmentNode, hasParent = false) => {
+  const renderOrgAssignmentNode = (node: OrgAssignmentNode) => {
     const nodeKey = node.row.employeeId ?? node.row.id ?? node.row.originalIndex;
 
     return (
       <div key={nodeKey} className="relative inline-flex flex-col items-center align-top">
-        {hasParent && <div className="absolute -top-8 left-1/2 h-8 w-px bg-slate-300" />}
         {renderOrgAssignmentCard(node.row)}
         {node.children.length > 0 && (
           <div className="relative mt-10 inline-flex items-start justify-center gap-6">
-            <div className="absolute -top-10 left-1/2 h-10 w-px bg-slate-300" />
-            {node.children.length > 1 && <div className="absolute -top-10 left-[150px] right-[150px] h-px bg-slate-300" />}
-            {node.children.map((child) => renderOrgAssignmentNode(child, true))}
+            <div className="absolute -top-10 left-1/2 h-5 w-px bg-slate-300" />
+            {node.children.length > 1 && <div className="absolute -top-5 left-[150px] right-[150px] h-px bg-slate-300" />}
+            {node.children.map((child) => (
+              <div key={child.row.employeeId ?? child.row.id ?? child.row.originalIndex} className="relative inline-flex">
+                <div className="absolute -top-5 left-1/2 h-5 w-px bg-slate-300" />
+                {renderOrgAssignmentNode(child)}
+              </div>
+            ))}
           </div>
         )}
       </div>

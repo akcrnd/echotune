@@ -18,7 +18,7 @@ The reference file `시험시작팀.xls` contains these relevant sheets:
 
 Add a new `팀 적격성 관리` menu. The page is organized by team and year, then shows four operational tabs:
 
-- `조직 및 업무분장`: team-only org chart cards, employee identity from the org chart, report-specific role title, detailed responsibility, job description, and deputy.
+- `조직 및 업무분장`: team-only org chart cards, employee identity from the org chart, report-specific role title, detailed responsibility, and deputy. Job description data can remain in storage but is hidden from the default card view until needed.
 - `업무분류`: major category, core functions, control items, related docs, cooperating team/work.
 - `요구기준 및 평가`: requirement rows with major/sub work, education, major, certification, experience, training, language, role-level standards, minimum level, and per-member scores.
 - `요구자격 및 보유자`: required qualification, grade, holders, held qualification, plan, remarks.
@@ -60,7 +60,7 @@ This makes inline editing simple and avoids partial-save drift between related s
 After field review, the module must not behave like a blank workbook editor.
 
 - Employee name, employee number, position, manager, and organization order come from `employees.manager_id` and are read-only here.
-- Team competency can edit role title, detailed responsibility, job description, deputies, competency criteria, scores, qualification plans, and remarks.
+- Team competency can edit role title, detailed responsibility, deputies, competency criteria, scores, qualification plans, and remarks. Job description remains an optional stored field, not a required visible card field.
 - Detailed responsibility cards belong only in team competency. The global org chart remains a clean personnel hierarchy and should not display report-specific job descriptions.
 - Existing or newly created reports are auto-repaired with the reference competency template when key sections are empty.
 - Score matrices are generated from the current team roster and requirement list.

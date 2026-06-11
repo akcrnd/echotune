@@ -38,6 +38,8 @@ Runtime services:
 - `postgres`: internal Postgres for application data
 - `echotune`: app service exposed on `22023`
 
+Do not set fixed `container_name` values in this Compose file. Dokploy needs project-scoped container names so redeploys replace the right containers and logs/metrics stay attached to the selected Compose project.
+
 The default deployment keeps app and database in the same Dokploy Compose app. The app connects to Postgres through Docker's internal service DNS:
 
 ```env

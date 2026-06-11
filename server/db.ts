@@ -283,6 +283,105 @@ CREATE TABLE IF NOT EXISTS teams (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS team_competency_reports (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  team_code VARCHAR NOT NULL,
+  team_name TEXT NOT NULL,
+  evaluation_year INTEGER NOT NULL,
+  revision TEXT DEFAULT 'Rev.00',
+  role_summary TEXT,
+  prepared_by TEXT,
+  checked_by TEXT,
+  approved_by TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (team_code, evaluation_year)
+);
+
+CREATE TABLE IF NOT EXISTS team_role_assignments (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  report_id VARCHAR NOT NULL REFERENCES team_competency_reports(id) ON DELETE CASCADE,
+  role_group TEXT,
+  employee_id VARCHAR REFERENCES employees(id) ON DELETE SET NULL,
+  employee_name TEXT,
+  position_title TEXT,
+  responsibilities TEXT,
+  deputy_employee_id VARCHAR REFERENCES employees(id) ON DELETE SET NULL,
+  deputy_name TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS team_work_categories (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  report_id VARCHAR NOT NULL REFERENCES team_competency_reports(id) ON DELETE CASCADE,
+  category_no TEXT,
+  category_name TEXT NOT NULL,
+  major_functions TEXT,
+  control_items TEXT,
+  special_notes TEXT,
+  related_docs TEXT,
+  cooperating_team TEXT,
+  cooperating_work TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS team_competency_requirements (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  report_id VARCHAR NOT NULL REFERENCES team_competency_reports(id) ON DELETE CASCADE,
+  category_id VARCHAR REFERENCES team_work_categories(id) ON DELETE SET NULL,
+  major_no TEXT,
+  major_name TEXT,
+  sub_no TEXT,
+  sub_name TEXT NOT NULL,
+  required_major TEXT,
+  required_certification TEXT,
+  min_knowledge TEXT,
+  proficiency_period TEXT,
+  required_training TEXT,
+  language_requirement TEXT,
+  dept_head_level TEXT,
+  manager_level TEXT,
+  staff_level TEXT,
+  minimum_level TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS team_competency_scores (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  requirement_id VARCHAR NOT NULL REFERENCES team_competency_requirements(id) ON DELETE CASCADE,
+  employee_id VARCHAR REFERENCES employees(id) ON DELETE SET NULL,
+  employee_name TEXT,
+  score REAL,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (requirement_id, employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS team_required_qualifications (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  report_id VARCHAR NOT NULL REFERENCES team_competency_reports(id) ON DELETE CASCADE,
+  item_no TEXT,
+  requirement_item TEXT NOT NULL,
+  requirement_name TEXT,
+  required_grade TEXT,
+  holder_summary TEXT,
+  held_qualification TEXT,
+  plan TEXT,
+  remarks TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS proposals (
   id VARCHAR PRIMARY KEY,
   employee_id VARCHAR NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
@@ -371,6 +470,12 @@ CREATE INDEX IF NOT EXISTS idx_awards_employee_id ON awards(employee_id);
 CREATE INDEX IF NOT EXISTS idx_projects_employee_id ON projects(employee_id);
 CREATE INDEX IF NOT EXISTS idx_proposals_employee_id ON proposals(employee_id);
 CREATE INDEX IF NOT EXISTS idx_rd_evaluations_employee_year ON rd_evaluations(employee_id, evaluation_year);
+CREATE INDEX IF NOT EXISTS idx_team_competency_reports_team_year ON team_competency_reports(team_code, evaluation_year);
+CREATE INDEX IF NOT EXISTS idx_team_role_assignments_report_id ON team_role_assignments(report_id);
+CREATE INDEX IF NOT EXISTS idx_team_work_categories_report_id ON team_work_categories(report_id);
+CREATE INDEX IF NOT EXISTS idx_team_competency_requirements_report_id ON team_competency_requirements(report_id);
+CREATE INDEX IF NOT EXISTS idx_team_competency_scores_requirement_id ON team_competency_scores(requirement_id);
+CREATE INDEX IF NOT EXISTS idx_team_required_qualifications_report_id ON team_required_qualifications(report_id);
 `;
 
 let schemaReadyPromise: Promise<void> | null = null;

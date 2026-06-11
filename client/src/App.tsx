@@ -12,6 +12,7 @@ import Training from "@/pages/training";
 import TrainingAnalysis from "@/pages/training-analysis";
 import Achievements from "@/pages/achievements";
 import RdEvaluation from "@/pages/rd-evaluation";
+import TeamCompetency from "@/pages/team-competency";
 import Reports from "@/pages/reports";
 import NotFound from "@/pages/not-found";
 import Sidebar from "@/components/layout/sidebar";
@@ -36,6 +37,7 @@ function Router() {
             <Route path="/training-analysis" component={TrainingAnalysis} />
             <Route path="/achievements" component={Achievements} />
             <Route path="/rd-evaluation" component={RdEvaluation} />
+            <Route path="/team-competency" component={TeamCompetency} />
             <Route path="/reports" component={Reports} />
             <Route component={NotFound} />
           </Switch>

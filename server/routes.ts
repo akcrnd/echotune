@@ -1,6 +1,7 @@
 ﻿import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { pool } from "./db";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import fs from "fs";
@@ -51,6 +52,180 @@ function normalizeEmployeeRequestBody(body: Record<string, any>): Record<string,
   }
 
   return normalized;
+}
+
+function toNullableString(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text.length > 0 ? text : null;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toIntegerOrDefault(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+}
+
+function rowTeamCompetencyReport(row: any) {
+  return {
+    id: row.id,
+    teamCode: row.team_code,
+    teamName: row.team_name,
+    evaluationYear: row.evaluation_year,
+    revision: row.revision,
+    roleSummary: row.role_summary,
+    preparedBy: row.prepared_by,
+    checkedBy: row.checked_by,
+    approvedBy: row.approved_by,
+    status: row.status,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowTeamRoleAssignment(row: any) {
+  return {
+    id: row.id,
+    reportId: row.report_id,
+    roleGroup: row.role_group,
+    employeeId: row.employee_id,
+    employeeName: row.employee_name,
+    positionTitle: row.position_title,
+    responsibilities: row.responsibilities,
+    deputyEmployeeId: row.deputy_employee_id,
+    deputyName: row.deputy_name,
+    displayOrder: row.display_order,
+  };
+}
+
+function rowTeamWorkCategory(row: any) {
+  return {
+    id: row.id,
+    reportId: row.report_id,
+    categoryNo: row.category_no,
+    categoryName: row.category_name,
+    majorFunctions: row.major_functions,
+    controlItems: row.control_items,
+    specialNotes: row.special_notes,
+    relatedDocs: row.related_docs,
+    cooperatingTeam: row.cooperating_team,
+    cooperatingWork: row.cooperating_work,
+    displayOrder: row.display_order,
+  };
+}
+
+function rowTeamCompetencyRequirement(row: any) {
+  return {
+    id: row.id,
+    reportId: row.report_id,
+    categoryId: row.category_id,
+    majorNo: row.major_no,
+    majorName: row.major_name,
+    subNo: row.sub_no,
+    subName: row.sub_name,
+    requiredMajor: row.required_major,
+    requiredCertification: row.required_certification,
+    minKnowledge: row.min_knowledge,
+    proficiencyPeriod: row.proficiency_period,
+    requiredTraining: row.required_training,
+    languageRequirement: row.language_requirement,
+    deptHeadLevel: row.dept_head_level,
+    managerLevel: row.manager_level,
+    staffLevel: row.staff_level,
+    minimumLevel: row.minimum_level,
+    displayOrder: row.display_order,
+    scores: [] as any[],
+  };
+}
+
+function rowTeamCompetencyScore(row: any) {
+  return {
+    id: row.id,
+    requirementId: row.requirement_id,
+    employeeId: row.employee_id,
+    employeeName: row.employee_name,
+    score: row.score,
+    notes: row.notes,
+  };
+}
+
+function rowTeamRequiredQualification(row: any) {
+  return {
+    id: row.id,
+    reportId: row.report_id,
+    itemNo: row.item_no,
+    requirementItem: row.requirement_item,
+    requirementName: row.requirement_name,
+    requiredGrade: row.required_grade,
+    holderSummary: row.holder_summary,
+    heldQualification: row.held_qualification,
+    plan: row.plan,
+    remarks: row.remarks,
+    displayOrder: row.display_order,
+  };
+}
+
+async function loadTeamCompetencyDetail(reportId: string) {
+  const reportResult = await pool.query("SELECT * FROM team_competency_reports WHERE id = $1", [reportId]);
+  const reportRow = reportResult.rows[0];
+  if (!reportRow) return null;
+
+  const [assignmentsResult, categoriesResult, requirementsResult, scoresResult, qualificationsResult, membersResult] =
+    await Promise.all([
+      pool.query("SELECT * FROM team_role_assignments WHERE report_id = $1 ORDER BY display_order, created_at", [reportId]),
+      pool.query("SELECT * FROM team_work_categories WHERE report_id = $1 ORDER BY display_order, created_at", [reportId]),
+      pool.query("SELECT * FROM team_competency_requirements WHERE report_id = $1 ORDER BY display_order, created_at", [reportId]),
+      pool.query(
+        `SELECT s.*
+         FROM team_competency_scores s
+         JOIN team_competency_requirements r ON r.id = s.requirement_id
+         WHERE r.report_id = $1
+         ORDER BY s.created_at`,
+        [reportId],
+      ),
+      pool.query("SELECT * FROM team_required_qualifications WHERE report_id = $1 ORDER BY display_order, created_at", [reportId]),
+      pool.query(
+        `SELECT id, employee_number, name, position, department, team, department_code, team_code, is_active
+         FROM employees
+         WHERE is_active IS DISTINCT FROM FALSE
+           AND (team_code = $1 OR team = $2)
+         ORDER BY name`,
+        [reportRow.team_code, reportRow.team_name],
+      ),
+    ]);
+
+  const requirements = requirementsResult.rows.map(rowTeamCompetencyRequirement);
+  const requirementsById = new Map(requirements.map((requirement) => [requirement.id, requirement]));
+  for (const row of scoresResult.rows) {
+    const score = rowTeamCompetencyScore(row);
+    const requirement = requirementsById.get(score.requirementId);
+    if (requirement) requirement.scores.push(score);
+  }
+
+  return {
+    report: rowTeamCompetencyReport(reportRow),
+    teamMembers: membersResult.rows.map((row) => ({
+      id: row.id,
+      employeeNumber: row.employee_number,
+      name: row.name,
+      position: row.position,
+      department: row.department,
+      team: row.team,
+      departmentCode: row.department_code,
+      teamCode: row.team_code,
+      isActive: row.is_active,
+    })),
+    assignments: assignmentsResult.rows.map(rowTeamRoleAssignment),
+    workCategories: categoriesResult.rows.map(rowTeamWorkCategory),
+    requirements,
+    qualifications: qualificationsResult.rows.map(rowTeamRequiredQualification),
+  };
 }
 
 // Helper function to parse Excel dates
@@ -1648,6 +1823,309 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("팀 삭제 오류:", error);
       res.status(500).json({ error: "팀을 삭제할 수 없습니다." });
+    }
+  });
+
+  app.get("/api/team-competency/reports", async (req, res) => {
+    try {
+      const { teamCode, year } = req.query;
+      const values: any[] = [];
+      const where: string[] = [];
+
+      if (typeof teamCode === "string" && teamCode.trim()) {
+        values.push(teamCode.trim());
+        where.push(`team_code = $${values.length}`);
+      }
+
+      if (typeof year === "string" && year.trim()) {
+        values.push(Number(year));
+        where.push(`evaluation_year = $${values.length}`);
+      }
+
+      const result = await pool.query(
+        `
+          SELECT r.*,
+            (SELECT COUNT(*)::int FROM team_role_assignments a WHERE a.report_id = r.id) AS assignment_count,
+            (SELECT COUNT(*)::int FROM team_work_categories c WHERE c.report_id = r.id) AS work_category_count,
+            (SELECT COUNT(*)::int FROM team_competency_requirements q WHERE q.report_id = r.id) AS requirement_count,
+            (SELECT COUNT(*)::int FROM team_required_qualifications qf WHERE qf.report_id = r.id) AS qualification_count
+          FROM team_competency_reports r
+          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+          ORDER BY evaluation_year DESC, team_name ASC
+        `,
+        values,
+      );
+
+      return res.json(
+        result.rows.map((row) => ({
+          ...rowTeamCompetencyReport(row),
+          assignmentCount: row.assignment_count,
+          workCategoryCount: row.work_category_count,
+          requirementCount: row.requirement_count,
+          qualificationCount: row.qualification_count,
+        })),
+      );
+    } catch (error) {
+      console.error("팀 적격성 보고서 목록 오류:", error);
+      res.status(500).json({ error: "팀 적격성 보고서를 불러올 수 없습니다." });
+    }
+  });
+
+  app.post("/api/team-competency/reports/ensure", async (req, res) => {
+    try {
+      const teamCode = toNullableString(req.body.teamCode);
+      const teamName = toNullableString(req.body.teamName);
+      const evaluationYear = toIntegerOrDefault(req.body.evaluationYear, new Date().getFullYear());
+
+      if (!teamCode || !teamName) {
+        return res.status(400).json({ error: "팀 코드와 팀명이 필요합니다." });
+      }
+
+      const result = await pool.query(
+        `
+          INSERT INTO team_competency_reports (team_code, team_name, evaluation_year, revision, status)
+          VALUES ($1, $2, $3, $4, 'draft')
+          ON CONFLICT (team_code, evaluation_year)
+          DO UPDATE SET team_name = EXCLUDED.team_name, updated_at = NOW()
+          RETURNING *
+        `,
+        [teamCode, teamName, evaluationYear, toNullableString(req.body.revision) ?? "Rev.00"],
+      );
+
+      const report = rowTeamCompetencyReport(result.rows[0]);
+      const assignmentCount = await pool.query(
+        "SELECT COUNT(*)::int AS count FROM team_role_assignments WHERE report_id = $1",
+        [report.id],
+      );
+
+      if (assignmentCount.rows[0]?.count === 0) {
+        const members = await pool.query(
+          `SELECT id, name, position
+           FROM employees
+           WHERE is_active IS DISTINCT FROM FALSE
+             AND (team_code = $1 OR team = $2)
+           ORDER BY name`,
+          [teamCode, teamName],
+        );
+
+        for (let index = 0; index < members.rows.length; index += 1) {
+          const member = members.rows[index];
+          await pool.query(
+            `
+              INSERT INTO team_role_assignments
+                (report_id, role_group, employee_id, employee_name, position_title, responsibilities, display_order)
+              VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `,
+            [report.id, teamName, member.id, member.name, member.position, "", index],
+          );
+        }
+      }
+
+      return res.status(201).json(await loadTeamCompetencyDetail(report.id));
+    } catch (error) {
+      console.error("팀 적격성 보고서 생성 오류:", error);
+      res.status(500).json({ error: "팀 적격성 보고서를 만들 수 없습니다." });
+    }
+  });
+
+  app.get("/api/team-competency/reports/:id", async (req, res) => {
+    try {
+      const detail = await loadTeamCompetencyDetail(req.params.id);
+      if (!detail) {
+        return res.status(404).json({ error: "팀 적격성 보고서를 찾을 수 없습니다." });
+      }
+      return res.json(detail);
+    } catch (error) {
+      console.error("팀 적격성 보고서 상세 오류:", error);
+      res.status(500).json({ error: "팀 적격성 보고서를 불러올 수 없습니다." });
+    }
+  });
+
+  app.put("/api/team-competency/reports/:id", async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const reportId = req.params.id;
+      const report = req.body.report ?? {};
+      const assignments = Array.isArray(req.body.assignments) ? req.body.assignments : [];
+      const workCategories = Array.isArray(req.body.workCategories) ? req.body.workCategories : [];
+      const requirements = Array.isArray(req.body.requirements) ? req.body.requirements : [];
+      const qualifications = Array.isArray(req.body.qualifications) ? req.body.qualifications : [];
+
+      await client.query("BEGIN");
+
+      const reportResult = await client.query(
+        `
+          UPDATE team_competency_reports
+          SET revision = COALESCE($2, revision),
+              role_summary = $3,
+              prepared_by = $4,
+              checked_by = $5,
+              approved_by = $6,
+              status = COALESCE($7, status),
+              notes = $8,
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [
+          reportId,
+          toNullableString(report.revision),
+          toNullableString(report.roleSummary),
+          toNullableString(report.preparedBy),
+          toNullableString(report.checkedBy),
+          toNullableString(report.approvedBy),
+          toNullableString(report.status),
+          toNullableString(report.notes),
+        ],
+      );
+
+      if (!reportResult.rows[0]) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "팀 적격성 보고서를 찾을 수 없습니다." });
+      }
+
+      await client.query(
+        `
+          DELETE FROM team_competency_scores
+          WHERE requirement_id IN (
+            SELECT id FROM team_competency_requirements WHERE report_id = $1
+          )
+        `,
+        [reportId],
+      );
+      await client.query("DELETE FROM team_competency_requirements WHERE report_id = $1", [reportId]);
+      await client.query("DELETE FROM team_work_categories WHERE report_id = $1", [reportId]);
+      await client.query("DELETE FROM team_role_assignments WHERE report_id = $1", [reportId]);
+      await client.query("DELETE FROM team_required_qualifications WHERE report_id = $1", [reportId]);
+
+      for (let index = 0; index < assignments.length; index += 1) {
+        const row = assignments[index] ?? {};
+        await client.query(
+          `
+            INSERT INTO team_role_assignments
+              (report_id, role_group, employee_id, employee_name, position_title, responsibilities, deputy_employee_id, deputy_name, display_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          `,
+          [
+            reportId,
+            toNullableString(row.roleGroup),
+            toNullableString(row.employeeId),
+            toNullableString(row.employeeName),
+            toNullableString(row.positionTitle),
+            toNullableString(row.responsibilities),
+            toNullableString(row.deputyEmployeeId),
+            toNullableString(row.deputyName),
+            toIntegerOrDefault(row.displayOrder, index),
+          ],
+        );
+      }
+
+      for (let index = 0; index < workCategories.length; index += 1) {
+        const row = workCategories[index] ?? {};
+        await client.query(
+          `
+            INSERT INTO team_work_categories
+              (report_id, category_no, category_name, major_functions, control_items, special_notes, related_docs, cooperating_team, cooperating_work, display_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `,
+          [
+            reportId,
+            toNullableString(row.categoryNo),
+            toNullableString(row.categoryName) ?? "업무분류",
+            toNullableString(row.majorFunctions),
+            toNullableString(row.controlItems),
+            toNullableString(row.specialNotes),
+            toNullableString(row.relatedDocs),
+            toNullableString(row.cooperatingTeam),
+            toNullableString(row.cooperatingWork),
+            toIntegerOrDefault(row.displayOrder, index),
+          ],
+        );
+      }
+
+      for (let index = 0; index < requirements.length; index += 1) {
+        const row = requirements[index] ?? {};
+        const requirementResult = await client.query(
+          `
+            INSERT INTO team_competency_requirements
+              (report_id, major_no, major_name, sub_no, sub_name, required_major, required_certification,
+               min_knowledge, proficiency_period, required_training, language_requirement,
+               dept_head_level, manager_level, staff_level, minimum_level, display_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            RETURNING id
+          `,
+          [
+            reportId,
+            toNullableString(row.majorNo),
+            toNullableString(row.majorName),
+            toNullableString(row.subNo),
+            toNullableString(row.subName) ?? "미지정 업무",
+            toNullableString(row.requiredMajor),
+            toNullableString(row.requiredCertification),
+            toNullableString(row.minKnowledge),
+            toNullableString(row.proficiencyPeriod),
+            toNullableString(row.requiredTraining),
+            toNullableString(row.languageRequirement),
+            toNullableString(row.deptHeadLevel),
+            toNullableString(row.managerLevel),
+            toNullableString(row.staffLevel),
+            toNullableString(row.minimumLevel),
+            toIntegerOrDefault(row.displayOrder, index),
+          ],
+        );
+
+        const requirementId = requirementResult.rows[0].id;
+        const scores = Array.isArray(row.scores) ? row.scores : [];
+        for (const scoreRow of scores) {
+          await client.query(
+            `
+              INSERT INTO team_competency_scores
+                (requirement_id, employee_id, employee_name, score, notes)
+              VALUES ($1, $2, $3, $4, $5)
+            `,
+            [
+              requirementId,
+              toNullableString(scoreRow.employeeId),
+              toNullableString(scoreRow.employeeName),
+              toNullableNumber(scoreRow.score),
+              toNullableString(scoreRow.notes),
+            ],
+          );
+        }
+      }
+
+      for (let index = 0; index < qualifications.length; index += 1) {
+        const row = qualifications[index] ?? {};
+        await client.query(
+          `
+            INSERT INTO team_required_qualifications
+              (report_id, item_no, requirement_item, requirement_name, required_grade,
+               holder_summary, held_qualification, plan, remarks, display_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `,
+          [
+            reportId,
+            toNullableString(row.itemNo),
+            toNullableString(row.requirementItem) ?? "요구자격",
+            toNullableString(row.requirementName),
+            toNullableString(row.requiredGrade),
+            toNullableString(row.holderSummary),
+            toNullableString(row.heldQualification),
+            toNullableString(row.plan),
+            toNullableString(row.remarks),
+            toIntegerOrDefault(row.displayOrder, index),
+          ],
+        );
+      }
+
+      await client.query("COMMIT");
+      return res.json(await loadTeamCompetencyDetail(reportId));
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("팀 적격성 보고서 저장 오류:", error);
+      res.status(500).json({ error: "팀 적격성 보고서를 저장할 수 없습니다." });
+    } finally {
+      client.release();
     }
   });
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Award, BriefcaseBusiness, CheckCircle2, ClipboardCheck, Pencil, Plus, Save, ShieldCheck, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Award, BriefcaseBusiness, CheckCircle2, ClipboardCheck, Pencil, Plus, Save, ShieldCheck, Trash2, Users, ChevronDown, ChevronUp, LayoutGrid, GitMerge, Check, BookOpen, FileText, Sparkles, TrendingUp, TrendingDown, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -305,6 +305,72 @@ function TextAreaCell({
   );
 }
 
+// Beautiful Custom Score Selector Component
+function ScoreSelector({
+  value,
+  onChange,
+  disabled
+}: {
+  value: string | number;
+  onChange: (val: string) => void;
+  disabled?: boolean;
+}) {
+  const currentVal = value !== "" && value !== null && value !== undefined ? Number(value) : null;
+  const levels = [0, 1, 2, 3, 4, 5];
+
+  return (
+    <div className="flex items-center justify-center gap-1">
+      {levels.map((lvl) => {
+        const isSelected = currentVal !== null && Math.floor(currentVal) === lvl;
+        const isExact = currentVal !== null && currentVal === lvl;
+        return (
+          <button
+            key={lvl}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(String(lvl))}
+            className={`w-7 h-7 rounded-full text-xs font-bold transition-all flex items-center justify-center ${
+              isExact
+                ? "bg-primary text-primary-foreground shadow-md scale-110 ring-2 ring-primary/20"
+                : isSelected
+                  ? "bg-primary/60 text-primary-foreground shadow-sm scale-105"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300"
+            } disabled:opacity-50`}
+          >
+            {lvl}
+          </button>
+        );
+      })}
+      <div className="flex flex-col gap-0.5 ml-1">
+        <button
+          type="button"
+          disabled={disabled || currentVal === null || currentVal >= 5}
+          onClick={() => {
+            if (currentVal !== null) {
+              onChange(String(Math.min(5, currentVal + 0.5)));
+            }
+          }}
+          className="px-1.5 py-0.5 text-[9px] font-bold bg-white hover:bg-slate-50 border border-slate-200 rounded shadow-sm cursor-pointer disabled:opacity-40"
+        >
+          +0.5
+        </button>
+        <button
+          type="button"
+          disabled={disabled || currentVal === null || currentVal <= 0}
+          onClick={() => {
+            if (currentVal !== null) {
+              onChange(String(Math.max(0, currentVal - 0.5)));
+            }
+          }}
+          className="px-1.5 py-0.5 text-[9px] font-bold bg-white hover:bg-slate-50 border border-slate-200 rounded shadow-sm cursor-pointer disabled:opacity-40"
+        >
+          -0.5
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function TeamCompetency() {
   const { toast } = useToast();
   const [selectedTeamCode, setSelectedTeamCode] = useState("");
@@ -312,6 +378,11 @@ export default function TeamCompetency() {
   const [detail, setDetail] = useState<TeamCompetencyDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState("");
+
+  // Custom UI State
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [selectedCategoryNo, setSelectedCategoryNo] = useState("");
+  const [orgViewMode, setOrgViewMode] = useState<"tree" | "list">("tree");
 
   const { data: teams = [], isLoading: isLoadingTeams } = useQuery<Team[]>({
     queryKey: ["/api/teams"],
@@ -335,6 +406,18 @@ export default function TeamCompetency() {
       setSelectedMemberId(detail.teamMembers[0].id);
     }
   }, [detail, selectedMemberId]);
+
+  // Default selectedCategoryNo when categories loaded
+  useEffect(() => {
+    if (detail?.workCategories && detail.workCategories.length > 0) {
+      const validNos = detail.workCategories.map((c) => c.categoryNo).filter(Boolean) as string[];
+      if (!selectedCategoryNo || !validNos.includes(selectedCategoryNo)) {
+        setSelectedCategoryNo(validNos[0] || "");
+      }
+    } else {
+      setSelectedCategoryNo("");
+    }
+  }, [detail, selectedCategoryNo]);
 
   useEffect(() => {
     if (!selectedTeamCode) return;
@@ -843,6 +926,38 @@ export default function TeamCompetency() {
     return Array.from(groups.values());
   }, [requirementRows, workCategoryLookup]);
 
+  const selectedGroup = useMemo(() => {
+    if (!detail) return null;
+
+    const selectedKey = normalizeKey(selectedCategoryNo);
+    const selectedCategoryEntry = detail.workCategories
+      .map((row, index) => ({ row, index }))
+      .find(({ row }) => normalizeKey(row.categoryNo) === selectedKey);
+
+    if (selectedCategoryEntry) {
+      const matchedGroup = competencyGroups.find(
+        (group) =>
+          normalizeKey(group.majorNo) === normalizeKey(selectedCategoryEntry.row.categoryNo) ||
+          normalizeKey(group.majorName) === normalizeKey(selectedCategoryEntry.row.categoryName),
+      );
+
+      return {
+        key: normalizeKey(selectedCategoryEntry.row.categoryNo ?? selectedCategoryEntry.row.categoryName ?? selectedCategoryEntry.index),
+        majorNo: selectedCategoryEntry.row.categoryNo,
+        majorName: selectedCategoryEntry.row.categoryName,
+        workCategory: selectedCategoryEntry.row,
+        workCategoryIndex: selectedCategoryEntry.index,
+        rows: matchedGroup?.rows ?? [],
+      };
+    }
+
+    return (
+      competencyGroups.find((group) => group.key === selectedKey || normalizeKey(group.majorNo) === selectedKey) ??
+      competencyGroups[0] ??
+      null
+    );
+  }, [competencyGroups, detail, selectedCategoryNo]);
+
   const competencyStats = useMemo(() => {
     if (!detail) {
       return {
@@ -916,47 +1031,80 @@ export default function TeamCompetency() {
     const evidenceCount = evidenceTotalForMember(member?.id);
 
     return (
-      <div className="relative w-[300px] rounded-sm border border-slate-400 bg-white shadow-sm">
-        <div className="border-b border-slate-400 bg-slate-100 px-2 py-1">
-          <Input
-            value={row.roleTitle ?? ""}
-            onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { roleTitle: event.target.value })}
-            placeholder="담당직무"
-            className="h-8 border-0 bg-transparent px-1 text-center font-semibold shadow-none focus-visible:ring-1"
-          />
-        </div>
-        <div className="grid grid-cols-[92px_1fr] border-b border-slate-400 text-sm">
-          <div className="flex items-center justify-center border-r border-slate-400 px-2 py-1 font-medium">
-            {member?.position ?? row.positionTitle ?? "-"}
+      <div className="relative w-[300px] rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/50 p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-300">
+        {/* Left position accent line */}
+        <div className={`absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl ${
+          member?.position?.includes("팀장") || member?.position?.includes("그룹장")
+            ? "bg-gradient-to-b from-indigo-500 to-violet-600"
+            : member?.position?.includes("책임")
+              ? "bg-gradient-to-b from-blue-400 to-indigo-500"
+              : "bg-slate-300"
+        }`} />
+
+        <div className="pl-2 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+              member?.position?.includes("팀장") || member?.position?.includes("그룹장")
+                ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-400"
+                : member?.position?.includes("책임")
+                  ? "bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            }`}>
+              {member?.position ?? row.positionTitle ?? "직급 미정"}
+            </span>
+            <Badge variant="outline" className="text-[10px] text-muted-foreground border-slate-200 bg-white/80">
+              증빙 {evidenceCount}건
+            </Badge>
           </div>
-          <div className="px-2 py-1 text-center">
-            <div className="font-medium">{member?.name ?? row.employeeName ?? "-"}</div>
-            <div className="text-[11px] text-muted-foreground">{member?.employeeNumber ?? "조직도 미연동"}</div>
+
+          <div className="flex items-baseline gap-2">
+            <h4 className="text-base font-bold text-slate-800">{member?.name ?? row.employeeName ?? "미지정"}</h4>
+            <span className="text-[10px] text-slate-400">{member?.employeeNumber ?? "조직도 미연동"}</span>
           </div>
-        </div>
-        <div className="space-y-2 px-2 py-2">
-          <div>
-            <div className="mb-1 text-[11px] font-medium text-muted-foreground">상세 담당 업무</div>
-            <Textarea
-              value={row.responsibilities ?? ""}
-              onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { responsibilities: event.target.value })}
-              placeholder={"1. 담당 업무\n2. 담당 업무"}
-              className="min-h-[116px] resize-y rounded-sm border-slate-300 text-xs leading-relaxed"
-            />
+
+          <div className="space-y-1 bg-white/60 dark:bg-slate-900/40 p-2.5 rounded-lg border border-slate-100/80">
+            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">담당 직무</span>
+            {isEditMode ? (
+              <Input
+                value={row.roleTitle ?? ""}
+                onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { roleTitle: event.target.value })}
+                placeholder="담당직무 입력"
+                className="h-8 mt-1 border-slate-200 text-xs shadow-none focus-visible:ring-1 bg-white"
+              />
+            ) : (
+              <p className="text-xs font-semibold text-slate-700">{row.roleTitle || "직무 미입력"}</p>
+            )}
           </div>
-        </div>
-        <div className="grid grid-cols-[82px_1fr] border-t border-slate-400 text-xs">
-          <div className="border-r border-slate-400 bg-slate-50 px-2 py-1 font-medium">업무대리인</div>
-          <Input
-            value={row.deputyName ?? ""}
-            onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { deputyName: event.target.value })}
-            placeholder="이름 / 직급"
-            className="h-7 rounded-none border-0 px-2 text-xs shadow-none focus-visible:ring-1"
-          />
-        </div>
-        <div className="flex items-center justify-between border-t border-slate-200 px-2 py-1 text-[11px] text-muted-foreground">
-          <span>상위자: {member?.managerName ?? "-"}</span>
-          <span>증빙 {evidenceCount}건</span>
+
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">상세 담당 업무</span>
+            {isEditMode ? (
+              <Textarea
+                value={row.responsibilities ?? ""}
+                onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { responsibilities: event.target.value })}
+                placeholder={"1. 업무내용\n2. 업무내용"}
+                className="min-h-[90px] mt-1 resize-y border-slate-200 text-xs leading-relaxed bg-white"
+              />
+            ) : (
+              <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap min-h-[60px] bg-slate-50/50 p-2 rounded border border-slate-100/50">
+                {row.responsibilities || "등록된 상세 업무가 없습니다."}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between border-t border-slate-100 pt-2.5 text-[11px]">
+            <span className="text-slate-400">대리인:</span>
+            {isEditMode ? (
+              <Input
+                value={row.deputyName ?? ""}
+                onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { deputyName: event.target.value })}
+                placeholder="대리인 이름/직급"
+                className="h-7 w-32 border-slate-200 text-xs shadow-none focus-visible:ring-1 bg-white"
+              />
+            ) : (
+              <span className="font-medium text-slate-700">{row.deputyName || "-"}</span>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -985,176 +1133,371 @@ export default function TeamCompetency() {
   };
 
   return (
-    <div className="p-6 space-y-5" data-testid="team-competency-page">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="p-6 space-y-6" data-testid="team-competency-page">
+      {/* Top Header Section */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between bg-white/50 backdrop-blur-md p-4 rounded-2xl border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)]">
         <div>
-          <h1 className="text-2xl font-bold">팀 적격성 관리</h1>
-          <p className="text-sm text-muted-foreground">
-            팀별 조직, 업무분류, 요구기준, 평가현황, 요구자격 보유 현황을 한 곳에서 관리합니다.
+          <h1 className="text-2xl font-black bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 bg-clip-text text-transparent flex items-center gap-2">
+            <ClipboardCheck className="h-6 w-6 text-indigo-600" />
+            팀 적격성 관리
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+             Ashimori 팀별 조직도, 직무 요건, 역량 평가 매트릭스 및 자격 증빙을 통합 관리합니다.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={selectedTeamCode}
-            onChange={(event) => setSelectedTeamCode(event.target.value)}
-            className="h-10 min-w-[180px] rounded-md border border-input bg-background px-3 text-sm"
-            data-testid="select-team-competency-team"
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg border border-slate-200/50">
+            <select
+              value={selectedTeamCode}
+              onChange={(event) => setSelectedTeamCode(event.target.value)}
+              className="h-8 min-w-[150px] rounded-md border-0 bg-transparent px-2 text-xs font-semibold focus-visible:ring-0 cursor-pointer"
+              data-testid="select-team-competency-team"
+            >
+              {isLoadingTeams && <option>팀 불러오는 중</option>}
+              {teams.map((team) => (
+                <option key={team.code} value={team.code}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+            <Input
+              type="number"
+              value={selectedYear}
+              onChange={(event) => setSelectedYear(Number(event.target.value))}
+              className="w-20 h-8 border-0 bg-white shadow-none text-xs font-bold text-center"
+              data-testid="input-team-competency-year"
+            />
+          </div>
+
+          <Button
+            size="sm"
+            onClick={() => ensureReportMutation.mutate()}
+            disabled={!selectedTeam || ensureReportMutation.isPending}
+            className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200/60 shadow-none font-bold text-xs h-8"
           >
-            {isLoadingTeams && <option>팀 불러오는 중</option>}
-            {teams.map((team) => (
-              <option key={team.code} value={team.code}>
-                {team.name}
-              </option>
-            ))}
-          </select>
-          <Input
-            type="number"
-            value={selectedYear}
-            onChange={(event) => setSelectedYear(Number(event.target.value))}
-            className="w-28"
-            data-testid="input-team-competency-year"
-          />
-          <Button onClick={() => ensureReportMutation.mutate()} disabled={!selectedTeam || ensureReportMutation.isPending}>
-            <Plus className="mr-2 h-4 w-4" />
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
             보고서 준비
           </Button>
-          <Button onClick={() => saveMutation.mutate()} disabled={!detail || isReportLocked || saveMutation.isPending}>
-            <Save className="mr-2 h-4 w-4" />
+
+          <Button
+            size="sm"
+            onClick={() => saveMutation.mutate()}
+            disabled={!detail || isReportLocked || saveMutation.isPending}
+            className="bg-primary hover:bg-primary/95 text-white font-bold text-xs h-8 shadow-sm"
+          >
+            <Save className="mr-1.5 h-3.5 w-3.5" />
             저장
           </Button>
+
+          {detail && (
+            <div className="flex items-center gap-1.5 ml-2 border-l pl-3 border-slate-200">
+              <Button
+                type="button"
+                size="sm"
+                variant={isEditMode ? "default" : "outline"}
+                onClick={() => setIsEditMode(!isEditMode)}
+                className={`h-8 font-bold text-xs transition-all ${
+                  isEditMode
+                    ? "bg-amber-500 hover:bg-amber-600 border-amber-600 text-white"
+                    : "text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <Settings className={`h-3.5 w-3.5 mr-1.5 ${isEditMode ? "animate-spin" : ""}`} />
+                {isEditMode ? "편집 완료" : "정보 수정"}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
       {detail ? (
         <>
           {isReportLocked && (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-              승인된 보고서입니다. 조직 정보와 평가 내용은 읽기 전용으로 잠겨 있습니다.
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-xs text-emerald-800 flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span>승인된 보고서입니다. 조직 정보와 평가 내용은 읽기 전용으로 잠겨 있습니다. 수정을 원하시면 결재 상태를 변경해 주세요.</span>
             </div>
           )}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center text-sm font-medium">
-                  <Users className="mr-2 h-4 w-4 text-muted-foreground" />
-                  팀원
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{detail.teamMembers.length}</div>
-                <p className="text-xs text-muted-foreground">현재 활성 팀원 기준</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center text-sm font-medium">
-                  <BriefcaseBusiness className="mr-2 h-4 w-4 text-muted-foreground" />
-                  업무분류
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{detail.workCategories.length}</div>
-                <p className="text-xs text-muted-foreground">관리 업무 카테고리</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center text-sm font-medium">
-                  <ClipboardCheck className="mr-2 h-4 w-4 text-muted-foreground" />
-                  평가 입력
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {scoreStats.entered}/{scoreStats.total}
+
+          {/* Stat Summary Row and Corporate Signature Box */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            {/* Stat Cards Grid */}
+            <div className="xl:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <Card className="border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.02)] hover:shadow-md transition-all duration-300">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">팀원 수</p>
+                    <p className="text-2xl font-black text-slate-800">{detail.teamMembers.length}</p>
+                    <p className="text-[9px] text-slate-400">현재 활성 멤버</p>
+                  </div>
+                  <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center border border-indigo-100/50">
+                    <Users className="w-5 h-5 text-indigo-600" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.02)] hover:shadow-md transition-all duration-300">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">업무분류</p>
+                    <p className="text-2xl font-black text-slate-800">{detail.workCategories.length}</p>
+                    <p className="text-[9px] text-slate-400">관리 대분류 영역</p>
+                  </div>
+                  <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center border border-blue-100/50">
+                    <BriefcaseBusiness className="w-5 h-5 text-blue-600" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.02)] hover:shadow-md transition-all duration-300">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">평가율</p>
+                    <div className="flex items-baseline gap-1">
+                      <p className="text-2xl font-black text-slate-800">
+                        {percentValue(scoreStats.entered, scoreStats.total)}%
+                      </p>
+                      <span className="text-[10px] text-slate-400">({scoreStats.entered}/{scoreStats.total})</span>
+                    </div>
+                    <p className="text-[9px] text-emerald-600 font-semibold">평균 {scoreStats.average.toFixed(1)}점</p>
+                  </div>
+                  <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center border border-emerald-100/50">
+                    <ClipboardCheck className="w-5 h-5 text-emerald-600" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.02)] hover:shadow-md transition-all duration-300">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">자격/증빙</p>
+                    <p className="text-2xl font-black text-slate-800">{detail.qualifications.length}</p>
+                    <p className="text-[9px] text-violet-600 font-semibold">증빙 데이터 {evidenceTotal}건</p>
+                  </div>
+                  <div className="w-10 h-10 bg-violet-50 rounded-xl flex items-center justify-center border border-violet-100/50">
+                    <Award className="w-5 h-5 text-violet-600" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Corporate Signature Line Block */}
+            <div className="xl:col-span-1">
+              <Card className="overflow-hidden border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.02)]">
+                <div className="bg-slate-50/50 px-4 py-2.5 border-b border-slate-100 flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">문서 승인 결재선</span>
+                  <Badge variant={
+                    detail.report.status === "approved" ? "default" :
+                    detail.report.status === "review" ? "secondary" : "outline"
+                  } className={`text-[10px] ${
+                    detail.report.status === "approved" ? "bg-emerald-500 hover:bg-emerald-600 text-white" :
+                    detail.report.status === "review" ? "bg-amber-500 hover:bg-amber-600 text-white" : ""
+                  }`}>
+                    {detail.report.status === "approved" ? "승인 완료" :
+                     detail.report.status === "review" ? "검토 진행중" : "작성중"}
+                  </Badge>
                 </div>
-                <p className="text-xs text-muted-foreground">평균 {scoreStats.average.toFixed(1)}점</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center text-sm font-medium">
-                  <Award className="mr-2 h-4 w-4 text-muted-foreground" />
-                  요구자격/증빙
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{detail.qualifications.length}</div>
-                <p className="text-xs text-muted-foreground">
-                  증빙 {evidenceTotal}건
-                </p>
-              </CardContent>
-            </Card>
+                <CardContent className="p-3 grid grid-cols-5 gap-2">
+                  <div className="flex flex-col items-center justify-center p-2 bg-slate-50/70 rounded-xl border border-slate-100 text-center">
+                    <span className="text-[9px] font-bold text-slate-400">Rev</span>
+                    {isEditMode ? (
+                      <Input
+                        disabled={isReportLocked}
+                        value={detail.report.revision ?? ""}
+                        onChange={(e) => updateReport("revision", e.target.value)}
+                        placeholder="Rev.00"
+                        className="mt-1 h-6 text-center text-[10px] w-full bg-white px-1 py-0.5 rounded border border-slate-200"
+                      />
+                    ) : (
+                      <span className="mt-1 text-xs font-bold text-slate-700">{detail.report.revision || "Rev.00"}</span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col items-center justify-center p-2 bg-slate-50/70 rounded-xl border border-slate-100 text-center relative overflow-hidden">
+                    <span className="text-[9px] font-bold text-slate-400">작성</span>
+                    {isEditMode ? (
+                      <Input
+                        disabled={isReportLocked}
+                        value={detail.report.preparedBy ?? ""}
+                        onChange={(e) => updateReport("preparedBy", e.target.value)}
+                        placeholder="작성자"
+                        className="mt-1 h-6 text-center text-[10px] w-full bg-white px-1 py-0.5 rounded border border-slate-200"
+                      />
+                    ) : (
+                      <div className="mt-1 flex flex-col items-center">
+                        <span className="text-xs font-bold text-slate-700 truncate max-w-full">{detail.report.preparedBy || "-"}</span>
+                        {detail.report.preparedBy && (
+                          <div className="absolute right-0.5 bottom-0.5 text-[7px] border border-red-200 text-red-500 rounded px-0.5 rotate-12 bg-white/90 font-serif font-black scale-90">
+                            작성
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col items-center justify-center p-2 bg-slate-50/70 rounded-xl border border-slate-100 text-center relative overflow-hidden">
+                    <span className="text-[9px] font-bold text-slate-400">검토</span>
+                    {isEditMode ? (
+                      <Input
+                        disabled={isReportLocked}
+                        value={detail.report.checkedBy ?? ""}
+                        onChange={(e) => updateReport("checkedBy", e.target.value)}
+                        placeholder="검토자"
+                        className="mt-1 h-6 text-center text-[10px] w-full bg-white px-1 py-0.5 rounded border border-slate-200"
+                      />
+                    ) : (
+                      <div className="mt-1 flex flex-col items-center">
+                        <span className="text-xs font-bold text-slate-700 truncate max-w-full">{detail.report.checkedBy || "-"}</span>
+                        {detail.report.checkedBy && (
+                          <div className="absolute right-0.5 bottom-0.5 text-[7px] border border-blue-200 text-blue-500 rounded px-0.5 rotate-12 bg-white/90 font-serif font-black scale-90">
+                            검토
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col items-center justify-center p-2 bg-slate-50/70 rounded-xl border border-slate-100 text-center relative overflow-hidden">
+                    <span className="text-[9px] font-bold text-slate-400">승인</span>
+                    {isEditMode ? (
+                      <Input
+                        disabled={isReportLocked}
+                        value={detail.report.approvedBy ?? ""}
+                        onChange={(e) => updateReport("approvedBy", e.target.value)}
+                        placeholder="승인자"
+                        className="mt-1 h-6 text-center text-[10px] w-full bg-white px-1 py-0.5 rounded border border-slate-200"
+                      />
+                    ) : (
+                      <div className="mt-1 flex flex-col items-center">
+                        <span className="text-xs font-bold text-slate-700 truncate max-w-full">{detail.report.approvedBy || "-"}</span>
+                        {detail.report.approvedBy && (
+                          <div className="absolute right-0.5 bottom-0.5 text-[7px] border border-emerald-200 text-emerald-500 rounded px-0.5 rotate-12 bg-white/90 font-serif font-black scale-90">
+                            승인
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col items-center justify-center p-2 bg-slate-50/70 rounded-xl border border-slate-100 text-center">
+                    <span className="text-[9px] font-bold text-slate-400">상태</span>
+                    {isEditMode ? (
+                      <select
+                        value={detail.report.status}
+                        onChange={(event) => updateReport("status", event.target.value)}
+                        disabled={isReportLocked}
+                        className="mt-1 h-6 rounded border border-slate-200 bg-white px-1 text-[10px] w-full"
+                      >
+                        <option value="draft">작성중</option>
+                        <option value="review">검토중</option>
+                        <option value="approved">승인</option>
+                      </select>
+                    ) : (
+                      <span className="mt-1 text-xs font-semibold text-slate-700 truncate max-w-full">
+                        {detail.report.status === "approved" ? "승인완료" :
+                         detail.report.status === "review" ? "검토중" : "작성중"}
+                      </span>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
 
+          {/* Operational Health Center */}
           {operationalStats && (
-            <Card className="border-slate-200">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center justify-between gap-3 text-base">
-                  <span className="flex items-center">
-                    <ShieldCheck className="mr-2 h-4 w-4 text-muted-foreground" />
-                    운영 점검
+            <Card className="border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.02)] overflow-hidden">
+              <CardHeader className="pb-3 bg-slate-50/30 border-b border-slate-100">
+                <CardTitle className="flex items-center justify-between gap-3 text-sm font-bold text-slate-700">
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4 text-indigo-500" />
+                    보고서 정합성 및 건강도 점검
                   </span>
-                  <Badge variant={operationalStats.readinessPercent >= 85 ? "default" : "secondary"}>
+                  <Badge variant={operationalStats.readinessPercent >= 85 ? "default" : "secondary"} className="text-[10px]">
                     {operationalStats.statusLabel}
                   </Badge>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-2xl font-bold">{operationalStats.readinessPercent}%</div>
-                    <p className="text-xs text-muted-foreground">조직 연동, 템플릿, 평가, 자격 증빙 기준</p>
+              <CardContent className="p-4 space-y-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-100">
+                  <div className="space-y-0.5">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl font-black text-indigo-600">{operationalStats.readinessPercent}%</span>
+                      <span className="text-xs text-muted-foreground">정비도</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">조직도 연동, 역할 분장, 평가 매트릭스 입력 및 자격 매칭 기준</p>
                   </div>
-                  <Progress value={operationalStats.readinessPercent} className="h-2 sm:max-w-sm" />
+                  <div className="w-full sm:max-w-md bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200/50">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 rounded-full transition-all duration-500"
+                      style={{ width: `${operationalStats.readinessPercent}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-md border px-3 py-2">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      조직도 연동
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className={`rounded-xl border p-3 flex flex-col justify-between transition-all hover:bg-slate-50/30 ${
+                    detail.teamMembers.length > 0 ? "border-emerald-100 bg-emerald-50/10" : "border-slate-200"
+                  }`}>
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                      <span>조직도 정렬 연동</span>
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {detail.teamMembers.length}명 / 조직도 순서 기준
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      {detail.teamMembers.length}명 팀원 / 깊이 순서 자동 매칭
                     </p>
                   </div>
-                  <div className="rounded-md border px-3 py-2">
-                    <div className="flex items-center gap-2 text-sm font-medium">
+
+                  <div className={`rounded-xl border p-3 flex flex-col justify-between transition-all hover:bg-slate-50/30 ${
+                    operationalStats.missingResponsibilities === 0 ? "border-emerald-100 bg-emerald-50/10" : "border-amber-100 bg-amber-50/10"
+                  }`}>
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                      <span>역할 및 담당 업무</span>
                       {operationalStats.missingResponsibilities === 0 ? (
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                       ) : (
-                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                        <AlertTriangle className="h-4 w-4 text-amber-500 animate-pulse" />
                       )}
-                      담당업무
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      미입력 {operationalStats.missingResponsibilities}건
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      {operationalStats.missingResponsibilities === 0
+                        ? "모든 임직원 역할 기재 완료"
+                        : `미작성 역할 요약 ${operationalStats.missingResponsibilities}건`}
                     </p>
                   </div>
-                  <div className="rounded-md border px-3 py-2">
-                    <div className="flex items-center gap-2 text-sm font-medium">
+
+                  <div className={`rounded-xl border p-3 flex flex-col justify-between transition-all hover:bg-slate-50/30 ${
+                    operationalStats.missingScores === 0 ? "border-emerald-100 bg-emerald-50/10" : "border-amber-100 bg-amber-50/10"
+                  }`}>
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                      <span>평가 매트릭스 채우기</span>
                       {operationalStats.missingScores === 0 ? (
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                       ) : (
-                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                        <AlertTriangle className="h-4 w-4 text-amber-500 animate-pulse" />
                       )}
-                      평가 매트릭스
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      미평가 {operationalStats.missingScores}칸
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      {operationalStats.missingScores === 0
+                        ? "요구조건 평가 매칭률 100%"
+                        : `미평가 요구 수준 ${operationalStats.missingScores}칸 존재`}
                     </p>
                   </div>
-                  <div className="rounded-md border px-3 py-2">
-                    <div className="flex items-center gap-2 text-sm font-medium">
+
+                  <div className={`rounded-xl border p-3 flex flex-col justify-between transition-all hover:bg-slate-50/30 ${
+                    operationalStats.missingQualificationHolders === 0 && evidenceTotal > 0 ? "border-emerald-100 bg-emerald-50/10" : "border-amber-100 bg-amber-50/10"
+                  }`}>
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                      <span>요구자격 및 증빙</span>
                       {operationalStats.missingQualificationHolders === 0 && evidenceTotal > 0 ? (
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                       ) : (
-                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                        <AlertTriangle className="h-4 w-4 text-amber-500 animate-pulse" />
                       )}
-                      자격/증빙
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      보유자 미입력 {operationalStats.missingQualificationHolders}건 · 직원 증빙 {evidenceTotal}건
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      보유자 미입력 {operationalStats.missingQualificationHolders}건 · 증빙 연동 {evidenceTotal}건
                     </p>
                   </div>
                 </div>
@@ -1162,533 +1505,898 @@ export default function TeamCompetency() {
             </Card>
           )}
 
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
-            <TextCell disabled={isReportLocked} value={detail.report.revision} onChange={(value) => updateReport("revision", value)} placeholder="Rev.00" />
-            <TextCell disabled={isReportLocked} value={detail.report.preparedBy} onChange={(value) => updateReport("preparedBy", value)} placeholder="작성" />
-            <TextCell disabled={isReportLocked} value={detail.report.checkedBy} onChange={(value) => updateReport("checkedBy", value)} placeholder="검토" />
-            <TextCell disabled={isReportLocked} value={detail.report.approvedBy} onChange={(value) => updateReport("approvedBy", value)} placeholder="승인" />
-            <select
-              value={detail.report.status}
-              onChange={(event) => updateReport("status", event.target.value)}
-              disabled={isReportLocked}
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="draft">작성중</option>
-              <option value="review">검토중</option>
-              <option value="approved">승인</option>
-            </select>
-          </div>
-
+          {/* Main Working Tabs */}
           <Tabs defaultValue="organization" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="organization">조직 및 업무분장</TabsTrigger>
-              <TabsTrigger value="competency">업무/요구기준 평가</TabsTrigger>
-              <TabsTrigger value="qualifications">요구자격 보유현황</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-3 bg-slate-100/80 p-1 rounded-xl border border-slate-200/50">
+              <TabsTrigger value="organization" className="rounded-lg font-bold text-xs">조직 및 업무분장</TabsTrigger>
+              <TabsTrigger value="competency" className="rounded-lg font-bold text-xs">업무/요구기준 평가</TabsTrigger>
+              <TabsTrigger value="qualifications" className="rounded-lg font-bold text-xs">요구자격 보유현황</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="organization" className="space-y-3">
+            {/* Tab 1: Organization & Responsibilities */}
+            <TabsContent value="organization" className="space-y-4">
               <div className="flex items-center justify-between">
-                <Badge variant="outline">{detail.report.teamName} / {detail.report.evaluationYear}</Badge>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Badge variant="secondary">조직도 기준 자동 정렬</Badge>
-                  {operationalStats && operationalStats.missingResponsibilities > 0 && (
-                    <Badge variant="outline">담당업무 미입력 {operationalStats.missingResponsibilities}건</Badge>
-                  )}
-                </div>
-              </div>
-              <fieldset disabled={isReportLocked} className="contents">
-                <div className="overflow-x-auto rounded-lg border bg-slate-50/70 p-4" data-testid="team-competency-org-chart">
-                  <div className="flex min-w-max items-start justify-center gap-8 px-4 py-2">
-                    {orgAssignmentTree.map((node) => renderOrgAssignmentNode(node))}
+                <Badge variant="outline" className="bg-white/80">{detail.report.teamName} / {detail.report.evaluationYear}</Badge>
+                <div className="flex items-center gap-2">
+                  <div className="flex rounded-lg border border-slate-200 bg-slate-100/80 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setOrgViewMode("tree")}
+                      className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${
+                        orgViewMode === "tree" ? "bg-white text-indigo-600 shadow-sm border border-slate-200/50" : "text-muted-foreground hover:text-slate-700"
+                      }`}
+                    >
+                      <GitMerge className="h-3 w-3" />
+                      조직도
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrgViewMode("list")}
+                      className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${
+                        orgViewMode === "list" ? "bg-white text-indigo-600 shadow-sm border border-slate-200/50" : "text-muted-foreground hover:text-slate-700"
+                      }`}
+                    >
+                      <LayoutGrid className="h-3 w-3" />
+                      카드 목록
+                    </button>
                   </div>
                 </div>
+              </div>
+
+              <fieldset disabled={isReportLocked} className="contents">
+                {orgViewMode === "tree" ? (
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/40 p-6 shadow-inner" data-testid="team-competency-org-chart">
+                    <div className="flex min-w-max items-start justify-center gap-8 px-4 py-2">
+                      {orgAssignmentTree.map((node) => renderOrgAssignmentNode(node))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 p-5 rounded-2xl border border-slate-200/80 bg-slate-50/40">
+                    {sortedAssignments.map((row) => (
+                      <div key={row.employeeId ?? row.id ?? row.originalIndex}>
+                        {renderOrgAssignmentCard(row)}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </fieldset>
             </TabsContent>
 
+            {/* Tab 2: Work Categories & Requirements Matrix */}
             <TabsContent value="competency" className="space-y-4">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline">업무 영역 {detail.workCategories.length}개</Badge>
-                  <Badge variant="outline">세부 업무 {detail.requirements.length}개</Badge>
-                  <Badge variant="outline">평가 {scoreStats.entered}/{scoreStats.total}</Badge>
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between bg-slate-50/50 p-3.5 rounded-xl border border-slate-200/60">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Badge variant="outline" className="bg-white/80">업무 영역 {detail.workCategories.length}개</Badge>
+                  <Badge variant="outline" className="bg-white/80">세부 요구사항 {detail.requirements.length}개</Badge>
+                  <Badge variant="outline" className="bg-white/80">매칭도 {scoreStats.entered}/{scoreStats.total}</Badge>
                   {operationalStats && operationalStats.missingScores > 0 && (
-                    <Badge variant="secondary">미평가 {operationalStats.missingScores}칸</Badge>
+                    <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-200">미평가 {operationalStats.missingScores}칸</Badge>
                   )}
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-sm font-medium">팀원 선택</label>
-                  <select
-                    value={selectedMember?.id ?? ""}
-                    onChange={(event) => setSelectedMemberId(event.target.value)}
-                    className="h-10 min-w-[180px] rounded-md border border-input bg-background px-3 text-sm"
-                    data-testid="select-team-competency-member"
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-slate-200">
+                    <label className="text-[11px] font-bold text-muted-foreground px-1.5 uppercase">임직원 평가</label>
+                    <select
+                      value={selectedMember?.id ?? ""}
+                      onChange={(event) => setSelectedMemberId(event.target.value)}
+                      className="h-7 min-w-[130px] rounded-md border-0 bg-transparent px-1.5 text-xs font-semibold focus-visible:ring-0 cursor-pointer"
+                      data-testid="select-team-competency-member"
+                    >
+                      {detail.teamMembers.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.name} {member.position}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={addWorkCategory}
+                    disabled={isReportLocked}
+                    className="text-xs h-8 border-slate-200 hover:bg-slate-50 font-bold"
                   >
-                    {detail.teamMembers.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.name} {member.position}
-                      </option>
-                    ))}
-                  </select>
-                  <Button variant="outline" size="sm" onClick={addWorkCategory} disabled={isReportLocked}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    업무 추가
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={addRequirement} disabled={isReportLocked}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    기준 추가
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    대분류 추가
                   </Button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-                <div className="rounded-lg border bg-white p-4">
-                  <div className="text-xs font-medium text-muted-foreground">전체 업무 영역</div>
-                  <div className="mt-2 text-2xl font-bold text-blue-700">{detail.workCategories.length}개</div>
-                  <div className="mt-1 text-xs text-muted-foreground">대분류</div>
-                </div>
-                <div className="rounded-lg border bg-white p-4">
-                  <div className="text-xs font-medium text-muted-foreground">전체 세부 업무</div>
-                  <div className="mt-2 text-2xl font-bold text-blue-700">{detail.requirements.length}개</div>
-                  <div className="mt-1 text-xs text-muted-foreground">요구기준 항목</div>
-                </div>
-                <div className="rounded-lg border bg-white p-4">
-                  <div className="text-xs font-medium text-muted-foreground">평균 요구 수준</div>
-                  <div className="mt-2 text-2xl font-bold">{formatAverage(competencyStats.requiredAverage)} / 5</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{requirementGroupForMember(selectedMember).label} 기준</div>
-                </div>
-                <div className="rounded-lg border bg-white p-4">
-                  <div className="text-xs font-medium text-muted-foreground">현재 평균 수준</div>
-                  <div className="mt-2 text-2xl font-bold">{formatAverage(competencyStats.selectedAverage)} / 5</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{selectedMember?.name ?? "선택 인원"} 기준</div>
-                </div>
-                <div className="rounded-lg border bg-white p-4">
-                  <div className="text-xs font-medium text-muted-foreground">평균 GAP</div>
-                  <div className={`mt-2 text-2xl font-bold ${competencyStats.averageGap !== null && competencyStats.averageGap < 0 ? "text-red-600" : "text-emerald-600"}`}>
-                    {gapLabel(competencyStats.averageGap)}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">현재 - 요구</div>
-                </div>
-              </div>
-
-              <div className="rounded-lg border bg-white p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold">역량 수준 분포</div>
-                    <div className="text-xs text-muted-foreground">{selectedMember?.name ?? "선택 인원"} 현재 수준 기준</div>
-                  </div>
-                  <Badge variant="outline">팀 평균 {formatAverage(competencyStats.teamAverage)} / 5</Badge>
-                </div>
-                <div className="mt-4 flex h-4 overflow-hidden rounded-full bg-slate-100">
-                  {selectedLevelTotal === 0 ? (
-                    <div className="h-full w-full bg-slate-200" />
-                  ) : (
-                    selectedLevelDistribution.map((bucket, index) => (
-                      <div
-                        key={bucket.level}
-                        className={["bg-red-500", "bg-orange-400", "bg-amber-300", "bg-emerald-500", "bg-blue-600"][index]}
-                        style={{ width: `${(bucket.count / selectedLevelTotal) * 100}%` }}
-                      />
-                    ))
-                  )}
-                </div>
-                <div className="mt-3 grid grid-cols-5 gap-2 text-center text-xs">
-                  {selectedLevelDistribution.map((bucket) => (
-                    <div key={bucket.level}>
-                      <div className="font-semibold">Lv.{bucket.level}</div>
-                      <div className="text-muted-foreground">
-                        {bucket.count}개 ({selectedLevelTotal ? Math.round((bucket.count / selectedLevelTotal) * 100) : 0}%)
+              {/* Grid of stats for Selected Member */}
+              {selectedMember && (
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                  <Card className="border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.01)] bg-slate-50/20">
+                    <CardContent className="p-3">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">대상 임직원</div>
+                      <div className="mt-1 font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                        <Users className="h-4.5 w-4.5 text-indigo-500" />
+                        {selectedMember.name}
                       </div>
-                    </div>
-                  ))}
+                      <div className="text-[10px] text-slate-400 mt-0.5">{selectedMember.position}</div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.01)] bg-slate-50/20">
+                    <CardContent className="p-3">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">평균 요구 수준</div>
+                      <div className="mt-1 text-base font-black text-slate-800">
+                        {formatAverage(competencyStats.requiredAverage)} <span className="text-xs text-muted-foreground font-normal">/ 5</span>
+                      </div>
+                      <div className="text-[9px] text-indigo-600 font-semibold mt-0.5">{requirementGroupForMember(selectedMember).label} 요건</div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.01)] bg-slate-50/20">
+                    <CardContent className="p-3">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">현재 평가 수준</div>
+                      <div className="mt-1 text-base font-black text-slate-800">
+                        {formatAverage(competencyStats.selectedAverage)} <span className="text-xs text-muted-foreground font-normal">/ 5</span>
+                      </div>
+                      <div className="text-[9px] text-emerald-600 font-semibold mt-0.5">{selectedMember.name} 임직원 기준</div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.01)] bg-slate-50/20">
+                    <CardContent className="p-3">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">GAP 분석</div>
+                      <div className={`mt-1 text-base font-black flex items-center gap-1 ${
+                        competencyStats.averageGap !== null && competencyStats.averageGap < 0 ? "text-red-500" : "text-emerald-500"
+                      }`}>
+                        {competencyStats.averageGap !== null && competencyStats.averageGap < 0 ? (
+                          <TrendingDown className="h-4.5 w-4.5" />
+                        ) : (
+                          <TrendingUp className="h-4.5 w-4.5" />
+                        )}
+                        {gapLabel(competencyStats.averageGap)}
+                      </div>
+                      <div className="text-[9px] text-slate-400 mt-0.5">요구대비 미달/초과 격차</div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.01)] bg-slate-50/20">
+                    <CardContent className="p-3">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">역량 보유율</div>
+                      <div className="mt-1 text-base font-black text-slate-800">
+                        {selectedLevelTotal > 0
+                          ? Math.round((competencyStats.selectedScores.filter(s => s >= 3).length / selectedLevelTotal) * 100)
+                          : 0}%
+                      </div>
+                      <div className="text-[9px] text-slate-400 mt-0.5">Lv.3 이상 확보 수준</div>
+                    </CardContent>
+                  </Card>
                 </div>
-              </div>
+              )}
 
-              <fieldset disabled={isReportLocked} className="contents">
-                <div className="overflow-x-auto rounded-lg border bg-white" data-testid="team-competency-merged-matrix">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-slate-50">
-                        <TableHead className="min-w-[260px]">대분류</TableHead>
-                        <TableHead className="min-w-[240px]">세부 업무</TableHead>
-                        <TableHead className="min-w-[190px]">최소 실무지식/경력</TableHead>
-                        <TableHead className="min-w-[150px]">숙달 소요기간</TableHead>
-                        <TableHead className="min-w-[150px] text-center">요구 수준</TableHead>
-                        <TableHead className="min-w-[120px] text-center">팀 평균</TableHead>
-                        <TableHead className="min-w-[96px] text-center">해당</TableHead>
-                        <TableHead className="min-w-[150px] text-center">선택 인원</TableHead>
-                        <TableHead className="min-w-[100px] text-center">GAP</TableHead>
-                        <TableHead className="min-w-[120px] text-center">육성 필요도</TableHead>
-                        <TableHead className="min-w-[260px]">관련 교육 / Tool</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {competencyGroups.map((group) =>
-                        group.rows.map(({ row, index }, rowIndex) => {
-                          const categoryIndex = group.workCategoryIndex;
-                          const category = group.workCategory;
-                          const selectedRequirementGroup = requirementGroupForMember(selectedMember);
-                          const selectedRequirementValue = requirementLevelForMember(row, selectedMember);
-                          const requiredLevel = levelNumber(selectedRequirementValue);
-                          const teamAverage = average(detail.teamMembers.map((member) => scoreNumberFor(row, member.id)));
-                          const selectedApplicable = selectedMember ? scoreApplicableFor(row, selectedMember.id) : true;
-                          const selectedScore = selectedMember && selectedApplicable ? scoreNumberFor(row, selectedMember.id) : null;
-                          const gap = selectedApplicable && selectedScore !== null && requiredLevel !== null ? selectedScore - requiredLevel : null;
-                          const need = selectedApplicable
-                            ? needSummary(gap)
-                            : { label: "비해당", className: "border-slate-200 bg-slate-50 text-slate-600" };
-                          const toolHint = numberedLine(category?.controlItems, row.subNo);
+              {/* Member competency level distribution */}
+              {selectedMember && selectedLevelTotal > 0 && (
+                <Card className="border-slate-200/60 shadow-sm overflow-hidden">
+                  <div className="p-3 bg-slate-50/30 border-b border-slate-100 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-slate-700">개인 역량 분포 그래프</span>
+                      <span className="text-[10px] text-slate-400 ml-1.5">{selectedMember.name}의 현재 직무수행 레벨 개수</span>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] bg-white text-indigo-600 border-indigo-100">
+                      팀 평균 {formatAverage(competencyStats.teamAverage)}점
+                    </Badge>
+                  </div>
+                  <CardContent className="p-4">
+                    <div className="flex h-3 overflow-hidden rounded-full bg-slate-100 border border-slate-200/30">
+                      {selectedLevelDistribution.map((bucket, index) => (
+                        <div
+                          key={bucket.level}
+                          className={["bg-rose-400", "bg-orange-300", "bg-amber-300", "bg-emerald-400", "bg-indigo-500"][index]}
+                          style={{ width: `${(bucket.count / selectedLevelTotal) * 100}%` }}
+                        />
+                      ))}
+                    </div>
+                    <div className="mt-3 grid grid-cols-5 gap-1.5 text-center text-[10px]">
+                      {selectedLevelDistribution.map((bucket, index) => (
+                        <div key={bucket.level} className="p-1.5 bg-slate-50/50 rounded-lg border border-slate-100">
+                          <div className="font-bold flex items-center justify-center gap-1">
+                            <span className={`w-1.5 h-1.5 rounded-full ${["bg-rose-400", "bg-orange-300", "bg-amber-300", "bg-emerald-400", "bg-indigo-500"][index]}`} />
+                            Lv.{bucket.level}
+                          </div>
+                          <div className="text-muted-foreground font-semibold mt-0.5">
+                            {bucket.count}개 ({selectedLevelTotal ? Math.round((bucket.count / selectedLevelTotal) * 100) : 0}%)
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-                          return (
-                            <TableRow key={row.id ?? index} className={gap !== null && gap < 0 ? "bg-red-50/30" : undefined}>
-                              {rowIndex === 0 && (
-                                <TableCell rowSpan={Math.max(group.rows.length, 1)} className="align-top border-r bg-slate-50/70">
-                                  <div className="space-y-3">
-                                    <HoverCard>
-                                      <HoverCardTrigger asChild>
-                                        <button type="button" className="w-full rounded-md border bg-white px-3 py-2 text-left hover:bg-slate-50">
-                                          <div className="text-xs font-medium text-muted-foreground">대분류 {category?.categoryNo ?? group.majorNo ?? "-"}</div>
-                                          <div className="mt-1 font-semibold">{category?.categoryName ?? group.majorName ?? "대분류 미입력"}</div>
-                                          <div className="mt-2 text-xs text-muted-foreground">{group.rows.length}개 세부 업무</div>
-                                        </button>
-                                      </HoverCardTrigger>
-                                      <HoverCardContent className="w-[420px]">
-                                        <div className="space-y-3 text-sm">
-                                          <div>
-                                            <div className="font-semibold">주요 업무 기능</div>
-                                            <div className="mt-1 whitespace-pre-line text-muted-foreground">{category?.majorFunctions || "-"}</div>
-                                          </div>
-                                          <div>
-                                            <div className="font-semibold">중점관리 항목</div>
-                                            <div className="mt-1 whitespace-pre-line text-muted-foreground">{category?.controlItems || "-"}</div>
-                                          </div>
-                                        </div>
-                                      </HoverCardContent>
-                                    </HoverCard>
-                                    <div className="flex flex-wrap gap-2">
-                                      <Dialog>
-                                        <DialogTrigger asChild>
-                                          <Button variant="outline" size="sm" disabled={categoryIndex === undefined}>
-                                            <Pencil className="mr-2 h-4 w-4" />
-                                            대분류 수정
-                                          </Button>
-                                        </DialogTrigger>
-                                        <DialogContent className="max-w-2xl">
-                                          <DialogHeader>
-                                            <DialogTitle>대분류 관리</DialogTitle>
-                                            <DialogDescription>{category?.categoryName ?? group.majorName ?? "대분류"} 업무 기능과 관리 항목</DialogDescription>
-                                          </DialogHeader>
-                                          {categoryIndex !== undefined && (
-                                            <div className="space-y-3">
-                                              <div className="grid grid-cols-[90px_1fr] gap-2">
-                                                <TextCell
-                                                  value={category?.categoryNo}
-                                                  onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { categoryNo: value })}
-                                                  placeholder="No"
-                                                  disabled={isReportLocked}
-                                                  className="w-full"
-                                                />
-                                                <TextCell
-                                                  value={category?.categoryName}
-                                                  onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { categoryName: value })}
-                                                  placeholder="대분류"
-                                                  disabled={isReportLocked}
-                                                  className="w-full"
-                                                />
-                                              </div>
-                                              <TextAreaCell
-                                                value={category?.majorFunctions}
-                                                onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { majorFunctions: value })}
-                                                placeholder="주요 업무 기능"
-                                                disabled={isReportLocked}
-                                                className="min-w-full"
-                                              />
-                                              <TextAreaCell
-                                                value={category?.controlItems}
-                                                onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { controlItems: value })}
-                                                placeholder="중점관리 항목 / Tool"
-                                                disabled={isReportLocked}
-                                                className="min-w-full"
-                                              />
-                                              <TextAreaCell
-                                                value={category?.relatedDocs}
-                                                onChange={(value) => updateArrayRow<WorkCategory>("workCategories", categoryIndex, { relatedDocs: value })}
-                                                placeholder="관련 문서/법규"
-                                                disabled={isReportLocked}
-                                                className="min-w-full"
-                                              />
-                                            </div>
-                                          )}
-                                        </DialogContent>
-                                      </Dialog>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => addRequirementForCategory(category?.categoryNo ?? group.majorNo, category?.categoryName ?? group.majorName, group.rows.length + 1)}
+              {/* Split Workspace Layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                {/* Left Panel: Category Navigator */}
+                <div className="lg:col-span-1 space-y-3">
+                  <div className="flex items-center justify-between px-2">
+                    <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">업무 영역 (대분류)</h3>
+                  </div>
+                  <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                    {detail.workCategories.map((cat, idx) => {
+                      const catNo = cat.categoryNo ?? "";
+                      const catName = cat.categoryName ?? "대분류 미입력";
+                      const isSelected = selectedCategoryNo === catNo;
+
+                      // Find requirements matching this category
+                      const matchedGroup = competencyGroups.find(
+                        (g) => normalizeKey(g.majorNo) === normalizeKey(catNo)
+                      );
+                      const totalReqs = matchedGroup ? matchedGroup.rows.length : 0;
+
+                      // Calculate completion rate
+                      let completedReqs = 0;
+                      if (matchedGroup && selectedMember) {
+                        matchedGroup.rows.forEach(({ row }) => {
+                          const hasVal = scoreFor(row, selectedMember.id);
+                          if (hasVal !== "" && hasVal !== null && hasVal !== undefined) {
+                            completedReqs++;
+                          }
+                        });
+                      }
+                      const completionRate = totalReqs > 0 ? Math.round((completedReqs / totalReqs) * 100) : 0;
+
+                      return (
+                        <div
+                          key={cat.id ?? idx}
+                          onClick={() => setSelectedCategoryNo(catNo)}
+                          className={`group relative flex flex-col p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                            isSelected
+                              ? "bg-indigo-50/50 border-indigo-500 shadow-sm"
+                              : "bg-white border-slate-200/80 hover:bg-slate-50/50 hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${
+                              isSelected ? "bg-indigo-500 text-white" : "bg-slate-100 text-slate-500"
+                            }`}>
+                              {catNo || `No.${idx + 1}`}
+                            </span>
+                            {totalReqs > 0 && (
+                              <span className="text-[10px] text-slate-400 font-bold">
+                                {completedReqs}/{totalReqs} 평가
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="mt-2 font-bold text-xs text-slate-800 line-clamp-1 pr-6">
+                            {catName}
+                          </div>
+
+                          {totalReqs > 0 && (
+                            <div className="mt-3 w-full bg-slate-100 rounded-full h-1">
+                              <div
+                                className={`h-1 rounded-full transition-all duration-300 ${
+                                  completionRate === 100 ? "bg-emerald-500" : "bg-indigo-500"
+                                }`}
+                                style={{ width: `${completionRate}%` }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Hover Actions inside Navigator */}
+                          <div className="absolute right-2 top-2.5 opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                              </DialogTrigger>
+                              <DialogContent onClick={(e) => e.stopPropagation()} className="max-w-md">
+                                <DialogHeader>
+                                  <DialogTitle>대분류 업무영역 수정</DialogTitle>
+                                  <DialogDescription>
+                                    대분류 코드 번호 및 영역 명칭을 변경합니다.
+                                  </DialogDescription>
+                                </DialogHeader>
+                                <div className="space-y-4 py-2">
+                                  <div className="grid grid-cols-4 gap-2">
+                                    <div className="col-span-1">
+                                      <label className="text-[10px] font-bold text-slate-400">No (대분류코드)</label>
+                                      <Input
                                         disabled={isReportLocked}
-                                      >
-                                        <Plus className="mr-2 h-4 w-4" />
-                                        세부업무 추가
-                                      </Button>
+                                        value={cat.categoryNo ?? ""}
+                                        onChange={(e) => updateArrayRow<WorkCategory>("workCategories", idx, { categoryNo: e.target.value })}
+                                      />
+                                    </div>
+                                    <div className="col-span-3">
+                                      <label className="text-[10px] font-bold text-slate-400">대분류 명칭</label>
+                                      <Input
+                                        disabled={isReportLocked}
+                                        value={cat.categoryName ?? ""}
+                                        onChange={(e) => updateArrayRow<WorkCategory>("workCategories", idx, { categoryName: e.target.value })}
+                                      />
                                     </div>
                                   </div>
-                                </TableCell>
-                              )}
-                              <TableCell className="align-top">
-                                <div className="space-y-2">
-                                  <div className="flex items-start gap-2">
-                                    <TextCell value={row.subNo} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subNo: value })} placeholder="No" className="w-16" />
-                                    <TextCell value={row.subName} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subName: value })} placeholder="업무명" className="min-w-[160px]" />
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => removeArrayRow("requirements", index)}
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-400">주요 업무 기능</label>
+                                    <Textarea
                                       disabled={isReportLocked}
-                                      title="세부업무 삭제"
-                                      aria-label={`${row.subName ?? "세부업무"} 삭제`}
-                                      className="h-10 w-10 shrink-0 text-muted-foreground hover:text-destructive"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <TextCell value={row.requiredMajor} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredMajor: value })} placeholder="전공" className="min-w-[110px]" />
-                                    <TextCell value={row.requiredCertification} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredCertification: value })} placeholder="자격증" className="min-w-[110px]" />
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell className="align-top">
-                                <TextAreaCell
-                                  value={row.minKnowledge}
-                                  onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minKnowledge: value })}
-                                  placeholder="최소 실무지식 / 경력 기간"
-                                  className="min-w-[170px]"
-                                />
-                              </TableCell>
-                              <TableCell className="align-top">
-                                <TextCell
-                                  value={row.proficiencyPeriod}
-                                  onChange={(value) => updateArrayRow<Requirement>("requirements", index, { proficiencyPeriod: value })}
-                                  placeholder="예: 12개월"
-                                  className="min-w-[130px]"
-                                />
-                              </TableCell>
-                              <TableCell className="text-center align-top">
-                                <div className="space-y-2">
-                                  <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${levelBadgeClass(requiredLevel)}`}>
-                                    {formatLevel(selectedRequirementValue)}
-                                  </span>
-                                  <div className="text-[11px] text-muted-foreground">{selectedRequirementGroup.label}</div>
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Button variant="outline" size="sm">
-                                        <Pencil className="mr-2 h-4 w-4" />
-                                        기준 설정
-                                      </Button>
-                                    </DialogTrigger>
-                                    <DialogContent>
-                                      <DialogHeader>
-                                        <DialogTitle>팀원별 요구수준 설정</DialogTitle>
-                                        <DialogDescription>{row.subName || "세부업무"} 직급 그룹별 요구수준</DialogDescription>
-                                      </DialogHeader>
-                                      <div className="grid gap-3">
-                                        <div className="grid grid-cols-[120px_1fr] items-center gap-3">
-                                          <label className="text-sm font-medium">책임 미만</label>
-                                          <TextCell
-                                            value={row.staffLevel}
-                                            onChange={(value) => updateArrayRow<Requirement>("requirements", index, { staffLevel: value })}
-                                            placeholder="Lv 또는 N/A"
-                                            disabled={isReportLocked}
-                                            className="w-full"
-                                          />
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr] items-center gap-3">
-                                          <label className="text-sm font-medium">책임 이상</label>
-                                          <TextCell
-                                            value={row.managerLevel}
-                                            onChange={(value) => updateArrayRow<Requirement>("requirements", index, { managerLevel: value })}
-                                            placeholder="Lv 또는 N/A"
-                                            disabled={isReportLocked}
-                                            className="w-full"
-                                          />
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr] items-center gap-3">
-                                          <label className="text-sm font-medium">팀장·그룹장</label>
-                                          <TextCell
-                                            value={row.deptHeadLevel}
-                                            onChange={(value) => updateArrayRow<Requirement>("requirements", index, { deptHeadLevel: value })}
-                                            placeholder="Lv 또는 N/A"
-                                            disabled={isReportLocked}
-                                            className="w-full"
-                                          />
-                                        </div>
-                                        <div className="grid grid-cols-[120px_1fr] items-center gap-3 rounded-md bg-yellow-50 p-2">
-                                          <label className="text-sm font-medium">최소 수준</label>
-                                          <TextCell
-                                            value={row.minimumLevel}
-                                            onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minimumLevel: value })}
-                                            placeholder="Lv"
-                                            disabled={isReportLocked}
-                                            className="w-full"
-                                          />
-                                        </div>
-                                      </div>
-                                    </DialogContent>
-                                  </Dialog>
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-center align-top">
-                                <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${levelBadgeClass(teamAverage, requiredLevel)}`}>
-                                  {formatLevel(teamAverage)}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-center align-top">
-                                {selectedMember ? (
-                                  <div className="flex flex-col items-center gap-1">
-                                    <Checkbox
-                                      checked={selectedApplicable}
-                                      onCheckedChange={(checked) => updateScoreApplicability(index, selectedMember, checked === true)}
-                                      disabled={isReportLocked}
-                                      aria-label={`${row.subName ?? "세부업무"} 해당 여부`}
+                                      value={cat.majorFunctions ?? ""}
+                                      onChange={(e) => updateArrayRow<WorkCategory>("workCategories", idx, { majorFunctions: e.target.value })}
+                                      rows={3}
+                                      className="text-xs"
                                     />
-                                    <span className="text-[11px] text-muted-foreground">{selectedApplicable ? "해당" : "비해당"}</span>
                                   </div>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">-</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-center align-top">
-                                {selectedMember ? (
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    max="5"
-                                    step="0.5"
-                                    value={scoreFor(row, selectedMember.id)}
-                                    onChange={(event) => updateScore(index, selectedMember, event.target.value)}
-                                    disabled={isReportLocked || !selectedApplicable}
-                                    className={`mx-auto w-20 text-center ${!selectedApplicable ? "border-slate-200 bg-slate-50 text-slate-400" : selectedScore === null ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50/40"}`}
-                                  />
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">-</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-center align-top">
-                                <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${gap !== null && gap < 0 ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
-                                  {gapLabel(gap)}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-center align-top">
-                                <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${need.className}`}>
-                                  {need.label}
-                                </span>
-                              </TableCell>
-                              <TableCell className="align-top">
-                                <div className="space-y-2">
-                                  <TextAreaCell
-                                    value={row.requiredTraining}
-                                    onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredTraining: value })}
-                                    placeholder="관련 교육 / Tool"
-                                    className="min-w-[240px]"
-                                  />
-                                  {toolHint && <div className="rounded-md bg-slate-50 px-2 py-1 text-xs text-muted-foreground">{toolHint}</div>}
-                                  <TextCell value={row.languageRequirement} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { languageRequirement: value })} placeholder="언어/수준" className="min-w-[140px]" />
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-400">중점관리 항목 / Tool</label>
+                                    <Textarea
+                                      disabled={isReportLocked}
+                                      value={cat.controlItems ?? ""}
+                                      onChange={(e) => updateArrayRow<WorkCategory>("workCategories", idx, { controlItems: e.target.value })}
+                                      rows={3}
+                                      className="text-xs"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-400">관련 문서/법규</label>
+                                    <Textarea
+                                      disabled={isReportLocked}
+                                      value={cat.relatedDocs ?? ""}
+                                      onChange={(e) => updateArrayRow<WorkCategory>("workCategories", idx, { relatedDocs: e.target.value })}
+                                      rows={2}
+                                      className="text-xs"
+                                    />
+                                  </div>
                                 </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        }),
-                      )}
-                    </TableBody>
-                  </Table>
+                              </DialogContent>
+                            </Dialog>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeArrayRow("workCategories", idx);
+                              }}
+                              disabled={isReportLocked}
+                              className="p-1 rounded bg-rose-50 hover:bg-rose-100 text-slate-400 hover:text-rose-600 disabled:opacity-50"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </fieldset>
+
+                {/* Right Panel: Selected Category Detail Matrix Table */}
+                <div className="lg:col-span-3 space-y-4">
+                  {selectedGroup ? (
+                    <Card className="border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.02)] overflow-hidden">
+                      {/* Active category details card */}
+                      <div className="p-4 bg-slate-50/50 border-b border-slate-100 space-y-2">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                            <span className="text-xs bg-indigo-500 text-white font-black px-2 py-0.5 rounded">
+                              {selectedGroup.majorNo}
+                            </span>
+                            {selectedGroup.majorName || "대분류 정보 없음"}
+                          </h2>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => addRequirementForCategory(selectedGroup.majorNo, selectedGroup.majorName, selectedGroup.rows.length + 1)}
+                              disabled={isReportLocked}
+                              className="text-[11px] h-7 font-bold border-slate-200"
+                            >
+                              <Plus className="h-3 w-3 mr-1" />
+                              세부업무 추가
+                            </Button>
+                          </div>
+                        </div>
+
+                        {(selectedGroup.workCategory?.majorFunctions || selectedGroup.workCategory?.controlItems) && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 p-3 bg-white rounded-xl border border-slate-100 text-[11px] leading-relaxed">
+                            {selectedGroup.workCategory.majorFunctions && (
+                              <div className="space-y-1">
+                                <span className="font-bold text-indigo-600 dark:text-indigo-400">주요 기능</span>
+                                <p className="text-slate-600 whitespace-pre-wrap">{selectedGroup.workCategory.majorFunctions}</p>
+                              </div>
+                            )}
+                            {selectedGroup.workCategory.controlItems && (
+                              <div className="space-y-1">
+                                <span className="font-bold text-indigo-600 dark:text-indigo-400">중점 관리 / Tool</span>
+                                <p className="text-slate-600 whitespace-pre-wrap">{selectedGroup.workCategory.controlItems}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <fieldset disabled={isReportLocked} className="contents">
+                        <div className="overflow-x-auto" data-testid="team-competency-merged-matrix">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-slate-50 text-[11px] font-bold">
+                                <TableHead className="w-[200px]">세부 업무 요건</TableHead>
+                                <TableHead className="min-w-[150px]">지식 / 경험 요건</TableHead>
+                                <TableHead className="w-[120px] text-center">요구수준 / 팀평균</TableHead>
+                                <TableHead className="w-[80px] text-center">해당 여부</TableHead>
+                                <TableHead className="w-[230px] text-center">수행 역량 평가 (임직원)</TableHead>
+                                <TableHead className="w-[80px] text-center">GAP</TableHead>
+                                <TableHead className="w-[90px] text-center">필요도</TableHead>
+                                <TableHead className="min-w-[150px]">교육 및 어학 요건</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {selectedGroup.rows.length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={8} className="text-center py-10 text-xs text-muted-foreground">
+                                    이 대분류 영역에 아직 세부 업무 요건이 없습니다.
+                                    <br />
+                                    위의 '세부업무 추가' 버튼을 눌러 첫 항목을 작성해 주세요.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                selectedGroup.rows.map(({ row, index }) => {
+                                  const category = selectedGroup.workCategory;
+                                  const selectedRequirementGroup = requirementGroupForMember(selectedMember);
+                                  const selectedRequirementValue = requirementLevelForMember(row, selectedMember);
+                                  const requiredLevel = levelNumber(selectedRequirementValue);
+                                  const teamAverage = average(detail.teamMembers.map((member) => scoreNumberFor(row, member.id)));
+                                  const selectedApplicable = selectedMember ? scoreApplicableFor(row, selectedMember.id) : true;
+                                  const selectedScore = selectedMember && selectedApplicable ? scoreNumberFor(row, selectedMember.id) : null;
+                                  const gap = selectedApplicable && selectedScore !== null && requiredLevel !== null ? selectedScore - requiredLevel : null;
+                                  const need = selectedApplicable
+                                    ? needSummary(gap)
+                                    : { label: "비해당", className: "border-slate-100 bg-slate-50/50 text-slate-400" };
+                                  const toolHint = numberedLine(category?.controlItems, row.subNo);
+
+                                  return (
+                                    <TableRow key={row.id ?? index} className={`text-xs hover:bg-slate-50/30 ${
+                                      gap !== null && gap < 0 ? "bg-rose-50/10" : ""
+                                    }`}>
+                                      {/* 세부 업무 */}
+                                      <TableCell className="align-top font-medium">
+                                        {isEditMode ? (
+                                          <div className="space-y-2">
+                                            <div className="flex items-start gap-1.5">
+                                              <TextCell value={row.subNo} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subNo: value })} placeholder="No" className="w-12 h-8 text-xs text-center" />
+                                              <TextCell value={row.subName} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { subName: value })} placeholder="세부업무명" className="h-8 text-xs w-full" />
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => removeArrayRow("requirements", index)}
+                                                disabled={isReportLocked}
+                                                className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                                              >
+                                                <Trash2 className="h-4 w-4" />
+                                              </Button>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                              <TextCell value={row.requiredMajor} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredMajor: value })} placeholder="권장 전공" className="h-7 text-[10px] w-full" />
+                                              <TextCell value={row.requiredCertification} onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredCertification: value })} placeholder="권장 자격증" className="h-7 text-[10px] w-full" />
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div className="space-y-1.5">
+                                            <div className="flex items-start gap-1">
+                                              <span className="text-[10px] bg-slate-100 font-bold px-1 rounded text-slate-600 shrink-0 mt-0.5">
+                                                {row.subNo || "-"}
+                                              </span>
+                                              <span className="font-semibold text-slate-800">{row.subName || "업무명 미입력"}</span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1.5 pl-4">
+                                              {row.requiredMajor && (
+                                                <Badge variant="outline" className="text-[9px] font-bold text-slate-500 bg-slate-50 px-1 py-0 border-slate-200">
+                                                  {row.requiredMajor}
+                                                </Badge>
+                                              )}
+                                              {row.requiredCertification && (
+                                                <Badge variant="secondary" className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border-indigo-100/50 px-1 py-0">
+                                                  {row.requiredCertification}
+                                                </Badge>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </TableCell>
+
+                                      {/* 지식 / 경험 요건 */}
+                                      <TableCell className="align-top">
+                                        {isEditMode ? (
+                                          <div className="space-y-2">
+                                            <TextAreaCell
+                                              value={row.minKnowledge}
+                                              onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minKnowledge: value })}
+                                              placeholder="최소 실무지식 / 경력 기준"
+                                              className="min-h-[50px] text-xs w-full"
+                                            />
+                                            <TextCell
+                                              value={row.proficiencyPeriod}
+                                              onChange={(value) => updateArrayRow<Requirement>("requirements", index, { proficiencyPeriod: value })}
+                                              placeholder="숙달 기간 (예: 12개월)"
+                                              className="h-7 text-[10px] w-full"
+                                            />
+                                          </div>
+                                        ) : (
+                                          <div className="space-y-1">
+                                            <p className="text-xs text-slate-600 leading-relaxed font-medium whitespace-pre-wrap">{row.minKnowledge || "-"}</p>
+                                            {row.proficiencyPeriod && (
+                                              <p className="text-[9px] text-slate-400 font-semibold">숙달소요: {row.proficiencyPeriod}</p>
+                                            )}
+                                          </div>
+                                        )}
+                                      </TableCell>
+
+                                      {/* 요구수준 / 팀 평균 */}
+                                      <TableCell className="text-center align-top">
+                                        <div className="flex flex-col items-center gap-1.5">
+                                          <div className="flex items-center gap-1">
+                                            <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold border ${levelBadgeClass(requiredLevel)}`}>
+                                              요구 {formatLevel(selectedRequirementValue)}
+                                            </span>
+                                          </div>
+                                          <span className="text-[9px] text-slate-400 font-medium">
+                                            {selectedRequirementGroup.label}
+                                          </span>
+                                          <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold border ${levelBadgeClass(teamAverage, requiredLevel)}`}>
+                                            평균 {formatLevel(teamAverage)}
+                                          </span>
+
+                                          <Dialog>
+                                            <DialogTrigger asChild>
+                                              <Button variant="ghost" size="sm" className="h-6 w-full text-[9px] font-bold border border-dashed border-slate-200 text-slate-500 hover:bg-slate-50">
+                                                기준 변경
+                                              </Button>
+                                            </DialogTrigger>
+                                            <DialogContent className="max-w-md">
+                                              <DialogHeader>
+                                                <DialogTitle>직급 그룹별 요구수준 설정</DialogTitle>
+                                                <DialogDescription>{row.subName || "세부업무"}의 등급 요구치</DialogDescription>
+                                              </DialogHeader>
+                                              <div className="grid gap-3 py-2">
+                                                <div className="grid grid-cols-3 items-center gap-3">
+                                                  <label className="text-xs font-bold text-slate-600">책임 미만 (Staff)</label>
+                                                  <TextCell
+                                                    value={row.staffLevel}
+                                                    onChange={(value) => updateArrayRow<Requirement>("requirements", index, { staffLevel: value })}
+                                                    placeholder="Lv 또는 N/A"
+                                                    disabled={isReportLocked}
+                                                    className="col-span-2"
+                                                  />
+                                                </div>
+                                                <div className="grid grid-cols-3 items-center gap-3">
+                                                  <label className="text-xs font-bold text-slate-600">책임 이상 (Senior)</label>
+                                                  <TextCell
+                                                    value={row.managerLevel}
+                                                    onChange={(value) => updateArrayRow<Requirement>("requirements", index, { managerLevel: value })}
+                                                    placeholder="Lv 또는 N/A"
+                                                    disabled={isReportLocked}
+                                                    className="col-span-2"
+                                                  />
+                                                </div>
+                                                <div className="grid grid-cols-3 items-center gap-3">
+                                                  <label className="text-xs font-bold text-slate-600">팀장·그룹장</label>
+                                                  <TextCell
+                                                    value={row.deptHeadLevel}
+                                                    onChange={(value) => updateArrayRow<Requirement>("requirements", index, { deptHeadLevel: value })}
+                                                    placeholder="Lv 또는 N/A"
+                                                    disabled={isReportLocked}
+                                                    className="col-span-2"
+                                                  />
+                                                </div>
+                                                <div className="grid grid-cols-3 items-center gap-3 rounded-lg bg-yellow-50/50 p-2 border border-yellow-100">
+                                                  <label className="text-xs font-bold text-yellow-800">최소 한계수준</label>
+                                                  <TextCell
+                                                    value={row.minimumLevel}
+                                                    onChange={(value) => updateArrayRow<Requirement>("requirements", index, { minimumLevel: value })}
+                                                    placeholder="Lv"
+                                                    disabled={isReportLocked}
+                                                    className="col-span-2 bg-white"
+                                                  />
+                                                </div>
+                                              </div>
+                                            </DialogContent>
+                                          </Dialog>
+                                        </div>
+                                      </TableCell>
+
+                                      {/* 해당 여부 */}
+                                      <TableCell className="text-center align-top">
+                                        {selectedMember ? (
+                                          <div className="flex flex-col items-center gap-1 justify-center pt-2">
+                                            <Checkbox
+                                              checked={selectedApplicable}
+                                              onCheckedChange={(checked) => updateScoreApplicability(index, selectedMember, checked === true)}
+                                              disabled={isReportLocked}
+                                              aria-label={`${row.subName ?? "세부업무"} 해당 여부`}
+                                              className="border-slate-300"
+                                            />
+                                            <span className={`text-[10px] font-bold ${selectedApplicable ? "text-indigo-600" : "text-slate-400"}`}>
+                                              {selectedApplicable ? "해당" : "비해당"}
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">-</span>
+                                        )}
+                                      </TableCell>
+
+                                      {/* 수행 역량 평가 */}
+                                      <TableCell className="text-center align-top">
+                                        {selectedMember ? (
+                                          <div className="space-y-2 py-1">
+                                            <ScoreSelector
+                                              value={scoreFor(row, selectedMember.id)}
+                                              onChange={(val) => updateScore(index, selectedMember, val)}
+                                              disabled={isReportLocked || !selectedApplicable}
+                                            />
+                                            <div className="flex items-center justify-between px-4 text-[9px] text-muted-foreground font-bold">
+                                              <span>미흡</span>
+                                              <span>보통</span>
+                                              <span>우수</span>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">-</span>
+                                        )}
+                                      </TableCell>
+
+                                      {/* GAP */}
+                                      <TableCell className="text-center align-top">
+                                        <div className="pt-2">
+                                          <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold border ${
+                                            gap !== null && gap < 0
+                                              ? "border-red-200 bg-red-50 text-red-700 dark:bg-red-950/20"
+                                              : gap !== null && gap > 0
+                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20"
+                                                : "border-slate-200 bg-slate-50 text-slate-600 dark:bg-slate-800"
+                                          }`}>
+                                            {gapLabel(gap)}
+                                          </span>
+                                        </div>
+                                      </TableCell>
+
+                                      {/* 필요도 */}
+                                      <TableCell className="text-center align-top">
+                                        <div className="pt-2">
+                                          <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold border ${need.className}`}>
+                                            {need.label}
+                                          </span>
+                                        </div>
+                                      </TableCell>
+
+                                      {/* 교육 및 어학 요건 */}
+                                      <TableCell className="align-top">
+                                        {isEditMode ? (
+                                          <div className="space-y-2">
+                                            <TextAreaCell
+                                              value={row.requiredTraining}
+                                              onChange={(value) => updateArrayRow<Requirement>("requirements", index, { requiredTraining: value })}
+                                              placeholder="교육 / Tool 조건"
+                                              className="min-h-[50px] text-xs w-full"
+                                            />
+                                            <TextCell
+                                              value={row.languageRequirement}
+                                              onChange={(value) => updateArrayRow<Requirement>("requirements", index, { languageRequirement: value })}
+                                              placeholder="어학 요건 (예: TOEIC 600)"
+                                              className="h-7 text-[10px] w-full"
+                                            />
+                                          </div>
+                                        ) : (
+                                          <div className="space-y-1.5 text-[11px]">
+                                            <p className="text-slate-600 leading-relaxed font-semibold">{row.requiredTraining || "-"}</p>
+                                            {toolHint && (
+                                              <p className="text-[10px] text-indigo-600 bg-indigo-50/30 px-1.5 py-0.5 rounded border border-indigo-100/30 inline-block font-semibold">
+                                                중점: {toolHint}
+                                              </p>
+                                            )}
+                                            {row.languageRequirement && (
+                                              <p className="text-[9px] text-slate-400 font-bold">어학: {row.languageRequirement}</p>
+                                            )}
+                                          </div>
+                                        )}
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </fieldset>
+                    </Card>
+                  ) : (
+                    <div className="flex min-h-[300px] items-center justify-center rounded-2xl border border-dashed bg-slate-50/20 text-center p-6 text-slate-400">
+                      <div>
+                        <FileText className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                        <h4 className="font-semibold text-slate-500">대분류가 등록되지 않았거나 선택되지 않았습니다</h4>
+                        <p className="text-xs text-muted-foreground mt-1">좌측 대분류 리스트에서 관리할 대분류 영역을 클릭하거나 업무를 추가해 주세요.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </TabsContent>
 
-            <TabsContent value="qualifications" className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap gap-2 text-sm">
-                  <Badge variant="outline">자격 {evidenceStats.certifications}건</Badge>
-                  <Badge variant="outline">스킬 {evidenceStats.skills}건</Badge>
-                  <Badge variant="outline">언어 {evidenceStats.languages}건</Badge>
-                  <Badge variant="outline">교육 {evidenceStats.trainings}건</Badge>
+            {/* Tab 3: Required Qualifications Status */}
+            <TabsContent value="qualifications" className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50/50 p-3 rounded-xl border border-slate-200/60">
+                <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                  <Badge variant="outline" className="bg-white/80 text-slate-600">자격 {evidenceStats.certifications}건</Badge>
+                  <Badge variant="outline" className="bg-white/80 text-slate-600">스킬 {evidenceStats.skills}건</Badge>
+                  <Badge variant="outline" className="bg-white/80 text-slate-600">어학 {evidenceStats.languages}건</Badge>
+                  <Badge variant="outline" className="bg-white/80 text-slate-600">사외교육 {evidenceStats.trainings}건</Badge>
                   {operationalStats && operationalStats.missingQualificationHolders > 0 && (
-                    <Badge variant="secondary">보유자 미입력 {operationalStats.missingQualificationHolders}건</Badge>
-                  )}
-                  {operationalStats && operationalStats.missingQualificationPlans > 0 && (
-                    <Badge variant="outline">계획 미입력 {operationalStats.missingQualificationPlans}건</Badge>
-                  )}
-                  {evidenceTotal === 0 && (
-                    <Badge variant="secondary">직원 증빙 데이터 미입력</Badge>
+                    <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-200">보유자 미입력 {operationalStats.missingQualificationHolders}건</Badge>
                   )}
                 </div>
-                <Button variant="outline" size="sm" onClick={addQualification} disabled={isReportLocked}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  자격 추가
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={addQualification}
+                  disabled={isReportLocked}
+                  className="text-xs font-bold border-slate-200 h-8 hover:bg-slate-50"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  자격 요구 추가
                 </Button>
               </div>
+
               <fieldset disabled={isReportLocked} className="contents">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>No</TableHead>
-                    <TableHead>요구 항목</TableHead>
-                    <TableHead>기준/자격명</TableHead>
-                    <TableHead>등급</TableHead>
-                    <TableHead>보유자 현황</TableHead>
-                    <TableHead>계획/비고</TableHead>
-                    <TableHead className="w-[60px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {detail.qualifications.map((row, index) => (
-                    <TableRow key={row.id ?? index}>
-                      <TableCell>
-                        <TextCell value={row.itemNo} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { itemNo: value })} className="w-20" />
-                      </TableCell>
-                      <TableCell>
-                        <TextCell value={row.requirementItem} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { requirementItem: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <TextAreaCell value={row.requirementName} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { requirementName: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <TextCell value={row.requiredGrade} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { requiredGrade: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-2">
-                          <TextAreaCell value={row.holderSummary} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { holderSummary: value })} placeholder="보유자 명" />
-                          {!row.holderSummary && <Badge variant="secondary">보유자 증빙 미입력</Badge>}
-                          <TextCell value={row.heldQualification} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { heldQualification: value })} placeholder="해당자격명/등급" />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-2">
-                          <TextAreaCell value={row.plan} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { plan: value })} placeholder="계획" />
-                          <TextAreaCell value={row.remarks} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { remarks: value })} placeholder="비고" />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => removeArrayRow("qualifications", index)} disabled={isReportLocked}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                <Card className="border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.02)] overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50 text-[11px] font-bold">
+                          <TableHead className="w-[80px]">No</TableHead>
+                          <TableHead className="min-w-[150px]">요구 항목 (분야)</TableHead>
+                          <TableHead className="min-w-[200px]">자격 및 기준 명칭</TableHead>
+                          <TableHead className="w-[100px]">요구 등급</TableHead>
+                          <TableHead className="min-w-[200px]">보유자 / 자격 현황</TableHead>
+                          <TableHead className="min-w-[200px]">향후 확보 계획 / 비고</TableHead>
+                          {isEditMode && <TableHead className="w-[60px]"></TableHead>}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detail.qualifications.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={isEditMode ? 7 : 6} className="text-center py-10 text-xs text-muted-foreground">
+                              등록된 필수 요구자격 항목이 없습니다.
+                              <br />
+                              우측 상단의 '자격 요구 추가' 버튼을 눌러 필수 자격을 설정하세요.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          detail.qualifications.map((row, index) => (
+                            <TableRow key={row.id ?? index} className="text-xs hover:bg-slate-50/30">
+                              {/* No */}
+                              <TableCell className="align-top font-bold text-slate-500">
+                                {isEditMode ? (
+                                  <TextCell value={row.itemNo} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { itemNo: value })} className="w-16 h-8 text-center text-xs" />
+                                ) : (
+                                  <span className="inline-block bg-slate-100 px-2 py-0.5 rounded mt-1">{row.itemNo || index + 1}</span>
+                                )}
+                              </TableCell>
+
+                              {/* 요구 항목 */}
+                              <TableCell className="align-top font-bold text-slate-700">
+                                {isEditMode ? (
+                                  <TextCell value={row.requirementItem} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { requirementItem: value })} className="h-8 text-xs w-full" />
+                                ) : (
+                                  <span className="mt-1 block">{row.requirementItem || "-"}</span>
+                                )}
+                              </TableCell>
+
+                              {/* 기준/자격명 */}
+                              <TableCell className="align-top">
+                                {isEditMode ? (
+                                  <TextAreaCell value={row.requirementName} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { requirementName: value })} className="min-h-[40px] text-xs w-full" />
+                                ) : (
+                                  <p className="mt-1 leading-relaxed text-slate-600 font-semibold whitespace-pre-wrap">{row.requirementName || "-"}</p>
+                                )}
+                              </TableCell>
+
+                              {/* 등급 */}
+                              <TableCell className="align-top">
+                                {isEditMode ? (
+                                  <TextCell value={row.requiredGrade} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { requiredGrade: value })} className="h-8 text-xs w-full" />
+                                ) : (
+                                  <span className="mt-1 inline-block bg-indigo-50 border border-indigo-100 text-indigo-700 rounded px-2 py-0.5 font-bold text-[10px]">
+                                    {row.requiredGrade || "-"}
+                                  </span>
+                                )}
+                              </TableCell>
+
+                              {/* 보유자 현황 */}
+                              <TableCell className="align-top">
+                                {isEditMode ? (
+                                  <div className="space-y-2">
+                                    <TextAreaCell value={row.holderSummary} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { holderSummary: value })} placeholder="보유자 명단 기재" className="min-h-[40px] text-xs w-full" />
+                                    <TextCell value={row.heldQualification} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { heldQualification: value })} placeholder="취득 자격등급" className="h-8 text-xs w-full" />
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1.5 mt-1">
+                                    {row.holderSummary ? (
+                                      <div className="flex flex-wrap gap-1">
+                                        {row.holderSummary.split(/[\s,]+/).filter(Boolean).map((name, nIdx) => (
+                                          <Badge key={nIdx} variant="secondary" className="bg-emerald-50 border-emerald-100 text-emerald-700 text-[10px] font-bold">
+                                            {name}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <Badge variant="outline" className="bg-rose-50 border-rose-100 text-rose-600 text-[9px] font-bold">
+                                        보유자 공란
+                                      </Badge>
+                                    )}
+                                    {row.heldQualification && (
+                                      <p className="text-[10px] text-slate-400 font-medium italic">자격내용: {row.heldQualification}</p>
+                                    )}
+                                  </div>
+                                )}
+                              </TableCell>
+
+                              {/* 계획/비고 */}
+                              <TableCell className="align-top">
+                                {isEditMode ? (
+                                  <div className="space-y-2">
+                                    <TextAreaCell value={row.plan} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { plan: value })} placeholder="향후 확보 계획" className="min-h-[40px] text-xs w-full" />
+                                    <TextAreaCell value={row.remarks} onChange={(value) => updateArrayRow<Qualification>("qualifications", index, { remarks: value })} placeholder="비고" className="min-h-[40px] text-xs w-full" />
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1 mt-1 text-[11px] leading-relaxed">
+                                    {row.plan && (
+                                      <p className="text-slate-600"><span className="font-bold text-slate-400 text-[10px] mr-1">[계획]</span>{row.plan}</p>
+                                    )}
+                                    {row.remarks && (
+                                      <p className="text-slate-400"><span className="font-bold text-slate-400 text-[10px] mr-1">[비고]</span>{row.remarks}</p>
+                                    )}
+                                    {!row.plan && !row.remarks && <span className="text-slate-400 font-medium">-</span>}
+                                  </div>
+                                )}
+                              </TableCell>
+
+                              {/* 삭제 버튼 */}
+                              {isEditMode && (
+                                <TableCell className="align-top">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => removeArrayRow("qualifications", index)}
+                                    disabled={isReportLocked}
+                                    className="h-8 w-8 text-slate-400 hover:text-destructive shrink-0 mt-1"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </Card>
               </fieldset>
             </TabsContent>
           </Tabs>
         </>
       ) : (
-        <div className="flex min-h-[420px] items-center justify-center rounded-lg border border-dashed bg-muted/20">
-          <div className="max-w-md text-center">
-            <h2 className="text-xl font-semibold">팀 적격성 보고서를 준비해 주세요</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              팀과 연도를 선택한 뒤 보고서를 준비하면 현재 팀원을 기준으로 입력 화면이 생성됩니다.
-            </p>
-            <Button className="mt-4" onClick={() => ensureReportMutation.mutate()} disabled={!selectedTeam || isLoadingDetail}>
-              <Plus className="mr-2 h-4 w-4" />
+        <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50/15">
+          <div className="max-w-md text-center p-6 space-y-4">
+            <div className="w-12 h-12 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto shadow-sm">
+              <ClipboardCheck className="h-6 w-6 text-indigo-600" />
+            </div>
+            <div className="space-y-1.5">
+              <h2 className="text-lg font-bold text-slate-800">팀 적격성 보고서를 준비해 주세요</h2>
+              <p className="text-xs text-muted-foreground leading-relaxed max-w-sm mx-auto">
+                선택한 팀과 연도의 평가 데이터가 아직 생성되지 않았습니다. 아래 '보고서 준비' 버튼을 누르면 현재 팀원을 기준으로 입력 화면이 즉시 구성됩니다.
+              </p>
+            </div>
+            <Button className="font-bold text-xs bg-indigo-600 hover:bg-indigo-700" onClick={() => ensureReportMutation.mutate()} disabled={!selectedTeam || isLoadingDetail}>
+              <Plus className="mr-1.5 h-4 w-4" />
               보고서 준비
             </Button>
           </div>

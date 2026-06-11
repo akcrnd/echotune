@@ -307,7 +307,9 @@ CREATE TABLE IF NOT EXISTS team_role_assignments (
   employee_id VARCHAR REFERENCES employees(id) ON DELETE SET NULL,
   employee_name TEXT,
   position_title TEXT,
+  role_title TEXT,
   responsibilities TEXT,
+  job_description TEXT,
   deputy_employee_id VARCHAR REFERENCES employees(id) ON DELETE SET NULL,
   deputy_name TEXT,
   display_order INTEGER NOT NULL DEFAULT 0,
@@ -472,6 +474,8 @@ CREATE INDEX IF NOT EXISTS idx_proposals_employee_id ON proposals(employee_id);
 CREATE INDEX IF NOT EXISTS idx_rd_evaluations_employee_year ON rd_evaluations(employee_id, evaluation_year);
 CREATE INDEX IF NOT EXISTS idx_team_competency_reports_team_year ON team_competency_reports(team_code, evaluation_year);
 CREATE INDEX IF NOT EXISTS idx_team_role_assignments_report_id ON team_role_assignments(report_id);
+ALTER TABLE team_role_assignments ADD COLUMN IF NOT EXISTS role_title TEXT;
+ALTER TABLE team_role_assignments ADD COLUMN IF NOT EXISTS job_description TEXT;
 CREATE INDEX IF NOT EXISTS idx_team_work_categories_report_id ON team_work_categories(report_id);
 CREATE INDEX IF NOT EXISTS idx_team_competency_requirements_report_id ON team_competency_requirements(report_id);
 CREATE INDEX IF NOT EXISTS idx_team_competency_scores_requirement_id ON team_competency_scores(requirement_id);

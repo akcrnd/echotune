@@ -210,7 +210,9 @@ function rowTeamRoleAssignment(row: any) {
     employeeId: row.employee_id,
     employeeName: row.employee_name,
     positionTitle: row.position_title,
+    roleTitle: row.role_title,
     responsibilities: row.responsibilities,
+    jobDescription: row.job_description,
     deputyEmployeeId: row.deputy_employee_id,
     deputyName: row.deputy_name,
     displayOrder: row.display_order,
@@ -384,10 +386,10 @@ async function ensureTeamCompetencyDefaults(reportRow: any) {
       await pool.query(
         `
           INSERT INTO team_role_assignments
-            (report_id, role_group, employee_id, employee_name, position_title, responsibilities, display_order)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (report_id, role_group, employee_id, employee_name, position_title, role_title, responsibilities, job_description, display_order)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `,
-        [reportId, reportRow.team_name, member.id, member.name, member.position, "", member.org_order],
+        [reportId, reportRow.team_name, member.id, member.name, member.position, "", "", "", member.org_order],
       );
     }
   }
@@ -2240,10 +2242,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await pool.query(
             `
               INSERT INTO team_role_assignments
-                (report_id, role_group, employee_id, employee_name, position_title, responsibilities, display_order)
-              VALUES ($1, $2, $3, $4, $5, $6, $7)
+                (report_id, role_group, employee_id, employee_name, position_title, role_title, responsibilities, job_description, display_order)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             `,
-            [report.id, teamName, member.id, member.name, member.position, "", index],
+            [report.id, teamName, member.id, member.name, member.position, "", "", "", index],
           );
         }
       }
@@ -2331,7 +2333,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const members = await getOrderedTeamMembers(reportRow.team_code, reportRow.team_name, client);
       const membersById = new Map(members.map((member: any) => [member.id, member]));
       type EditableAssignmentFields = {
+        roleTitle?: unknown;
         responsibilities?: unknown;
+        jobDescription?: unknown;
         deputyEmployeeId?: unknown;
         deputyName?: unknown;
       };
@@ -2359,10 +2363,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             SET role_group = $3,
                 employee_name = $4,
                 position_title = $5,
-                responsibilities = $6,
-                deputy_employee_id = $7,
-                deputy_name = $8,
-                display_order = $9,
+                role_title = $6,
+                responsibilities = $7,
+                job_description = $8,
+                deputy_employee_id = $9,
+                deputy_name = $10,
+                display_order = $11,
                 updated_at = NOW()
             WHERE report_id = $1 AND employee_id = $2
           `,
@@ -2372,7 +2378,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             reportRow.team_name,
             member.name,
             member.position,
+            toNullableString(row.roleTitle),
             toNullableString(row.responsibilities),
+            toNullableString(row.jobDescription),
             toNullableString(row.deputyEmployeeId),
             toNullableString(row.deputyName),
             member.org_order,
@@ -2383,8 +2391,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await client.query(
             `
               INSERT INTO team_role_assignments
-                (report_id, role_group, employee_id, employee_name, position_title, responsibilities, deputy_employee_id, deputy_name, display_order)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                (report_id, role_group, employee_id, employee_name, position_title, role_title, responsibilities, job_description, deputy_employee_id, deputy_name, display_order)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             `,
             [
               reportId,
@@ -2392,7 +2400,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               member.id,
               member.name,
               member.position,
+              toNullableString(row.roleTitle),
               toNullableString(row.responsibilities),
+              toNullableString(row.jobDescription),
               toNullableString(row.deputyEmployeeId),
               toNullableString(row.deputyName),
               member.org_order,

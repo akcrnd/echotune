@@ -50,7 +50,9 @@ type Assignment = {
   employeeId?: string | null;
   employeeName?: string | null;
   positionTitle?: string | null;
+  roleTitle?: string | null;
   responsibilities?: string | null;
+  jobDescription?: string | null;
   deputyEmployeeId?: string | null;
   deputyName?: string | null;
   displayOrder?: number;
@@ -363,9 +365,23 @@ export default function TeamCompetency() {
       .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
   }, [detail]);
 
+  const orgAssignmentLevels = useMemo(() => {
+    const levels = new Map<number, typeof sortedAssignments>();
+    for (const row of sortedAssignments) {
+      const member = row.employeeId ? teamMembersById.get(row.employeeId) : undefined;
+      const depth = member?.orgDepth ?? 0;
+      const rows = levels.get(depth) ?? [];
+      rows.push(row);
+      levels.set(depth, rows);
+    }
+    return Array.from(levels.entries()).sort(([a], [b]) => a - b);
+  }, [sortedAssignments, teamMembersById]);
+
   const operationalStats = useMemo(() => {
     if (!detail) return null;
-    const missingResponsibilities = detail.assignments.filter((row) => !hasText(row.responsibilities)).length;
+    const missingResponsibilities = detail.assignments.filter(
+      (row) => !hasText(row.roleTitle) || !hasText(row.responsibilities) || !hasText(row.jobDescription),
+    ).length;
     const missingQualificationHolders = detail.qualifications.filter((row) => !hasText(row.holderSummary)).length;
     const missingQualificationPlans = detail.qualifications.filter((row) => !hasText(row.plan)).length;
     const missingScores = Math.max(scoreStats.total - scoreStats.entered, 0);
@@ -749,54 +765,81 @@ export default function TeamCompetency() {
                 </div>
               </div>
               <fieldset disabled={isReportLocked} className="contents">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[80px]">순서</TableHead>
-                    <TableHead>팀원</TableHead>
-                    <TableHead>직급</TableHead>
-                    <TableHead>상위자</TableHead>
-                    <TableHead>담당 업무</TableHead>
-                    <TableHead>업무대리인</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedAssignments.map((row) => {
-                    const member = row.employeeId ? teamMembersById.get(row.employeeId) : undefined;
-                    const rowIndex = row.originalIndex;
-                    return (
-                    <TableRow key={row.id ?? rowIndex}>
-                      <TableCell>
-                        <span className="text-sm text-muted-foreground">{(row.displayOrder ?? rowIndex) + 1}</span>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1" style={{ paddingLeft: `${(member?.orgDepth ?? 0) * 18}px` }}>
-                          <div className="font-medium">{member?.name ?? row.employeeName ?? "-"}</div>
-                          <div className="text-xs text-muted-foreground">{member?.employeeNumber ?? "조직도 미연동"}</div>
-                          {member && (
-                            <Badge variant={evidenceTotalForMember(member.id) > 0 ? "outline" : "secondary"} className="text-[11px]">
-                              증빙 {evidenceTotalForMember(member.id)}건
-                            </Badge>
-                          )}
+                <div className="overflow-x-auto rounded-lg border bg-slate-50/70 p-4" data-testid="team-competency-org-chart">
+                  <div className="min-w-[980px] space-y-10">
+                    {orgAssignmentLevels.map(([depth, rows]) => (
+                      <div key={depth} className="relative">
+                        {depth > 0 && <div className="absolute -top-8 left-1/2 h-8 w-px bg-slate-300" />}
+                        {depth > 0 && rows.length > 1 && <div className="absolute -top-8 left-[10%] right-[10%] h-px bg-slate-300" />}
+                        <div className="flex flex-wrap justify-center gap-6">
+                          {rows.map((row) => {
+                            const member = row.employeeId ? teamMembersById.get(row.employeeId) : undefined;
+                            const rowIndex = row.originalIndex;
+                            const evidenceCount = evidenceTotalForMember(member?.id);
+                            return (
+                              <div
+                                key={row.id ?? rowIndex}
+                                className="relative w-[300px] rounded-sm border border-slate-400 bg-white shadow-sm"
+                              >
+                                {depth > 0 && <div className="absolute -top-8 left-1/2 h-8 w-px bg-slate-300" />}
+                                <div className="border-b border-slate-400 bg-slate-100 px-2 py-1">
+                                  <Input
+                                    value={row.roleTitle ?? ""}
+                                    onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { roleTitle: event.target.value })}
+                                    placeholder="담당직무"
+                                    className="h-8 border-0 bg-transparent px-1 text-center font-semibold shadow-none focus-visible:ring-1"
+                                  />
+                                </div>
+                                <div className="grid grid-cols-[92px_1fr] border-b border-slate-400 text-sm">
+                                  <div className="flex items-center justify-center border-r border-slate-400 px-2 py-1 font-medium">
+                                    {member?.position ?? row.positionTitle ?? "-"}
+                                  </div>
+                                  <div className="px-2 py-1 text-center">
+                                    <div className="font-medium">{member?.name ?? row.employeeName ?? "-"}</div>
+                                    <div className="text-[11px] text-muted-foreground">{member?.employeeNumber ?? "조직도 미연동"}</div>
+                                  </div>
+                                </div>
+                                <div className="space-y-2 px-2 py-2">
+                                  <div>
+                                    <div className="mb-1 text-[11px] font-medium text-muted-foreground">상세 담당 업무</div>
+                                    <Textarea
+                                      value={row.responsibilities ?? ""}
+                                      onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { responsibilities: event.target.value })}
+                                      placeholder={"1. 담당 업무\n2. 담당 업무"}
+                                      className="min-h-[116px] resize-y rounded-sm border-slate-300 text-xs leading-relaxed"
+                                    />
+                                  </div>
+                                  <div>
+                                    <div className="mb-1 text-[11px] font-medium text-muted-foreground">상세 직무 기술</div>
+                                    <Textarea
+                                      value={row.jobDescription ?? ""}
+                                      onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { jobDescription: event.target.value })}
+                                      placeholder="직무 목적, 산출물, 협업 범위"
+                                      className="min-h-[72px] resize-y rounded-sm border-slate-300 text-xs leading-relaxed"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-[82px_1fr] border-t border-slate-400 text-xs">
+                                  <div className="border-r border-slate-400 bg-slate-50 px-2 py-1 font-medium">업무대리인</div>
+                                  <Input
+                                    value={row.deputyName ?? ""}
+                                    onChange={(event) => updateArrayRow<Assignment>("assignments", rowIndex, { deputyName: event.target.value })}
+                                    placeholder="이름 / 직급"
+                                    className="h-7 rounded-none border-0 px-2 text-xs shadow-none focus-visible:ring-1"
+                                  />
+                                </div>
+                                <div className="flex items-center justify-between border-t border-slate-200 px-2 py-1 text-[11px] text-muted-foreground">
+                                  <span>상위자: {member?.managerName ?? "-"}</span>
+                                  <span>증빙 {evidenceCount}건</span>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{member?.position ?? row.positionTitle ?? "-"}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm text-muted-foreground">{member?.managerName ?? "-"}</span>
-                      </TableCell>
-                      <TableCell>
-                        <TextAreaCell value={row.responsibilities} onChange={(value) => updateArrayRow<Assignment>("assignments", rowIndex, { responsibilities: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <TextCell value={row.deputyName} onChange={(value) => updateArrayRow<Assignment>("assignments", rowIndex, { deputyName: value })} />
-                      </TableCell>
-                    </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </fieldset>
             </TabsContent>
 

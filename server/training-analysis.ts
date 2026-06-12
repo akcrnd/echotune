@@ -72,7 +72,10 @@ export class TrainingAnalysisModule {
 
     // 5. 부가 기능: 연도별 분석
     if (includeYearlyBreakdown) {
-      result.yearlyBreakdown = this.calculateYearlyBreakdown(trainingHoursData, teamEmployeesData, startYear, endYear);
+      result.yearlyBreakdown =
+        useAutoRdEmployees && allEmployees
+          ? this.calculateYearlyBreakdownWithAutoEmployees(trainingHoursData, allEmployees, startYear, endYear)
+          : this.calculateYearlyBreakdown(trainingHoursData, teamEmployeesData, startYear, endYear);
     }
 
     return result;
@@ -160,6 +163,32 @@ export class TrainingAnalysisModule {
     return breakdown;
   }
 
+  private static calculateYearlyBreakdownWithAutoEmployees(
+    trainingHoursData: TrainingHours[],
+    allEmployees: Employee[],
+    startYear: number,
+    endYear: number
+  ): { [year: string]: { totalHours: number; totalEmployees: number; averageHoursPerPerson: number } } {
+    const breakdown: { [year: string]: { totalHours: number; totalEmployees: number; averageHoursPerPerson: number } } = {};
+
+    for (let year = startYear; year <= endYear; year++) {
+      const yearTrainingHours = trainingHoursData
+        .filter(th => th.year === year)
+        .reduce((sum, th) => sum + th.hours, 0);
+
+      const yearEmployees = this.calculateAutoRdEmployeesByYear(allEmployees, year);
+      const yearAverage = yearEmployees > 0 ? yearTrainingHours / yearEmployees : 0;
+
+      breakdown[year.toString()] = {
+        totalHours: Math.round(yearTrainingHours * 10) / 10,
+        totalEmployees: yearEmployees,
+        averageHoursPerPerson: Math.round(yearAverage * 100) / 100
+      };
+    }
+
+    return breakdown;
+  }
+
   /**
    * 특정 교육 유형의 총 시간 계산 (부가 기능)
    */
@@ -198,33 +227,13 @@ export class TrainingAnalysisModule {
     startYear: number,
     endYear: number
   ): number {
-    
-    // 기술연구소 부문에 소속된 모든 직원을 R&D 인원으로 계산
-    const rdEmployees = allEmployees.filter(employee => {
-      // 부서명이 "기술연구소" 또는 "연구개발" 또는 "R&D"를 포함하는 경우
-      const isRdDepartment = employee.department && (
-        employee.department.includes('기술연구소') ||
-        employee.department.includes('연구개발') ||
-        employee.department.includes('R&D') ||
-        employee.department.includes('연구') ||
-        employee.departmentCode === 'RD' // 부서 코드가 RD인 경우
-      );
-      
-      // 팀명이 연구 관련인 경우도 포함
-      const isRdTeam = employee.team && (
-        employee.team.includes('연구') ||
-        employee.team.includes('개발') ||
-        employee.team.includes('R&D')
-      );
-      
-      const isRd = isRdDepartment || isRdTeam;
-      
-      
-      return isRd;
-    });
+    let cumulativeEmployees = 0;
 
-    
-    return rdEmployees.length;
+    for (let year = startYear; year <= endYear; year++) {
+      cumulativeEmployees += this.calculateAutoRdEmployeesByYear(allEmployees, year);
+    }
+
+    return cumulativeEmployees;
   }
 
   /**
@@ -234,29 +243,33 @@ export class TrainingAnalysisModule {
     allEmployees: Employee[],
     year: number
   ): number {
-    // 특정 연도에 입사한 R&D 직원 수 계산
     const rdEmployees = allEmployees.filter(employee => {
-      const isRdDepartment = employee.department && (
-        employee.department.includes('기술연구소') ||
-        employee.department.includes('연구개발') ||
-        employee.department.includes('R&D') ||
-        employee.department.includes('연구') ||
-        employee.departmentCode === 'RD'
-      );
-      
-      const isRdTeam = employee.team && (
-        employee.team.includes('연구') ||
-        employee.team.includes('개발') ||
-        employee.team.includes('R&D')
-      );
-      
-      // 입사일이 해당 연도인 경우
       const hireYear = employee.hireDate ? new Date(employee.hireDate).getFullYear() : null;
-      const isActiveInYear = hireYear && hireYear <= year;
+      const isActiveInYear = !hireYear || hireYear <= year;
       
-      return (isRdDepartment || isRdTeam) && isActiveInYear;
+      return this.isRdEmployee(employee) && isActiveInYear;
     });
 
     return rdEmployees.length;
+  }
+
+  private static isRdEmployee(employee: Pick<Employee, "department" | "departmentCode" | "team">): boolean {
+    const department = (employee.department ?? "").toUpperCase();
+    const departmentCode = (employee.departmentCode ?? "").toUpperCase();
+    const team = (employee.team ?? "").toUpperCase();
+
+    return (
+      department.includes("기술연구소") ||
+      department.includes("연구개발") ||
+      department.includes("연구") ||
+      department.includes("R&D") ||
+      department.includes("RND") ||
+      departmentCode === "RD" ||
+      departmentCode === "RND" ||
+      team.includes("연구") ||
+      team.includes("개발") ||
+      team.includes("R&D") ||
+      team.includes("RND")
+    );
   }
 }

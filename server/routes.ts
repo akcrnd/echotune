@@ -14,6 +14,7 @@ import {
   insertSkillSchema,
   insertSkillCalculationSchema
 } from "@shared/schema";
+import type { Employee, TrainingHistory, TrainingHours } from "@shared/schema";
 import { setupRdEvaluationRoutes } from "./rd-evaluation-routes";
 import { setupAchievementsRoutes } from "./achievements-routes";
 import { calculateCertificationScore } from "./rd-evaluation-auto";
@@ -58,6 +59,95 @@ function toNullableString(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
   return text.length > 0 ? text : null;
+}
+
+function isRdEmployee(employee: Pick<Employee, "department" | "departmentCode" | "team">): boolean {
+  const department = (employee.department ?? "").toUpperCase();
+  const departmentCode = (employee.departmentCode ?? "").toUpperCase();
+  const team = (employee.team ?? "").toUpperCase();
+
+  return (
+    department.includes("기술연구소") ||
+    department.includes("연구개발") ||
+    department.includes("연구") ||
+    department.includes("R&D") ||
+    department.includes("RND") ||
+    departmentCode === "RD" ||
+    departmentCode === "RND" ||
+    team.includes("연구") ||
+    team.includes("개발") ||
+    team.includes("R&D") ||
+    team.includes("RND")
+  );
+}
+
+function getTrainingRecordYear(training: TrainingHistory): number | null {
+  const dateValue = training.completionDate ?? training.startDate;
+  if (!dateValue) return null;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getFullYear();
+}
+
+function shouldCountTrainingForHours(training: TrainingHistory): boolean {
+  const duration = Number(training.duration ?? 0);
+  return training.status === "completed" && duration > 0 && getTrainingRecordYear(training) !== null;
+}
+
+function trainingHourKey(row: Pick<TrainingHours, "year" | "team" | "trainingType">): string {
+  return `${row.year}::${row.team}::${row.trainingType}`;
+}
+
+async function getTrainingHoursForAnalysis(startYear: number, endYear: number): Promise<TrainingHours[]> {
+  const [storedTrainingHours, trainingHistory, employees] = await Promise.all([
+    storage.getTrainingHoursByYearRange(startYear, endYear),
+    storage.getAllTrainingHistory(),
+    storage.getAllEmployees(),
+  ]);
+
+  const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
+  const derivedByKey = new Map<string, TrainingHours>();
+
+  for (const training of trainingHistory) {
+    if (!shouldCountTrainingForHours(training)) continue;
+
+    const year = getTrainingRecordYear(training);
+    if (!year || year < startYear || year > endYear) continue;
+
+    const employee = employeeById.get(training.employeeId);
+    const team = employee?.team || employee?.department || "기타";
+    const trainingType = training.type || "기타";
+    const key = trainingHourKey({ year, team, trainingType });
+    const existing = derivedByKey.get(key);
+    const hours = Number(training.duration ?? 0);
+
+    if (existing) {
+      existing.hours += hours;
+      existing.description = `${existing.description ?? ""}\n${training.courseName}`.trim();
+    } else {
+      derivedByKey.set(key, {
+        id: `training-history:${year}:${team}:${trainingType}`,
+        year,
+        team,
+        trainingType,
+        hours,
+        description: `교육 이력 자동 집계\n${training.courseName}`,
+        createdAt: training.createdAt ?? null,
+        updatedAt: training.createdAt ?? null,
+      } as TrainingHours);
+    }
+  }
+
+  // If the same team/year/type exists in education history, use the live history-derived value.
+  // This avoids double-counting older converted rows in training_hours.
+  const derivedKeys = new Set(derivedByKey.keys());
+  const manualOnlyRows = storedTrainingHours.filter((row) => !derivedKeys.has(trainingHourKey(row)));
+
+  return [...manualOnlyRows, ...Array.from(derivedByKey.values())].sort((a, b) => {
+    if (b.year !== a.year) return b.year - a.year;
+    if (a.team !== b.team) return a.team.localeCompare(b.team, "ko");
+    return a.trainingType.localeCompare(b.trainingType, "ko");
+  });
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -1291,10 +1381,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // 교육 이력 저장 후 자동으로 교육시간 데이터로 변환
       try {
-        const trainingYear = new Date(training.completionDate).getFullYear();
-        const employee = await storage.getEmployee(training.employeeId);
+        const trainingYear = getTrainingRecordYear(training);
+        const employee = shouldCountTrainingForHours(training)
+          ? await storage.getEmployee(training.employeeId)
+          : undefined;
 
-        if (employee) {
+        if (trainingYear && employee) {
           // 팀이 없는 직원은 부서명을 팀으로 사용
           const teamName = employee.team || employee.department || '기타';
 
@@ -3072,7 +3164,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`🔍 교육시간 데이터 조회: ${startYear}-${endYear}`);
 
       if (startYear && endYear) {
-        trainingHours = await storage.getTrainingHoursByYearRange(
+        trainingHours = await getTrainingHoursForAnalysis(
           parseInt(startYear as string),
           parseInt(endYear as string)
         );
@@ -3283,33 +3375,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allEmployees = await storage.getAllEmployees();
       console.log(`🔄 전체 직원 수: ${allEmployees.length}명`);
 
-      // 박연구 직원 찾기
-      const parkEmployee = allEmployees.find(emp => emp.name === '박연구');
-      if (parkEmployee) {
-        console.log(`🔍 박연구 직원 정보:`, {
-          id: parkEmployee.id,
-          name: parkEmployee.name,
-          team: parkEmployee.team,
-          department: parkEmployee.department
-        });
-
-        // 박연구의 교육 이력 조회
-        const parkTrainings = await storage.getTrainingHistoryByEmployee(parkEmployee.id);
-        console.log(`🔍 박연구의 교육 이력:`, parkTrainings);
-
-        parkTrainings.forEach(training => {
-          const trainingYear = new Date(training.completionDate).getFullYear();
-          console.log(`🔍 교육 이력 상세:`, {
-            id: training.id,
-            name: training.courseName, // trainingName → courseName
-            completionDate: training.completionDate,
-            year: trainingYear,
-            hours: training.duration, // hours → duration
-            trainingType: training.type // trainingType → type
-          });
-        });
-      }
-
       let convertedCount = 0;
       const teamTrainingHours = new Map<string, Map<string, number>>(); // team -> trainingType -> hours
 
@@ -3326,10 +3391,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`🔄 ${employee.name}(${teamName})의 교육 이력: ${trainings.length}개`);
 
         trainings.forEach(training => {
-          const trainingYear = new Date(training.completionDate).getFullYear();
-          console.log(`🔍 ${employee.name} 교육 상세: ${training.courseName}, ${trainingYear}년, ${training.duration}시간`);
+          const trainingYear = getTrainingRecordYear(training);
+          console.log(`🔍 ${employee.name} 교육 상세: ${training.courseName}, ${trainingYear ?? '-'}년, ${training.duration ?? 0}시간`);
 
-          if (trainingYear === year) {
+          if (trainingYear === year && shouldCountTrainingForHours(training)) {
             const type = training.type || '기타';
             const hours = training.duration || 0;
 
@@ -3351,8 +3416,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`🔍 팀별 집계 결과:`, teamTrainingHours);
 
       // 집계된 데이터를 교육시간 데이터로 생성
-      for (const [team, trainingTypes] of teamTrainingHours) {
-        for (const [trainingType, totalHours] of trainingTypes) {
+      for (const [team, trainingTypes] of Array.from(teamTrainingHours.entries())) {
+        for (const [trainingType, totalHours] of Array.from(trainingTypes.entries())) {
           if (totalHours > 0) {
             const trainingHoursData = {
               year: year,
@@ -3396,7 +3461,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`📊 팀별 교육시간 분석: ${start}-${end}`);
 
       // 교육 시간 데이터 조회
-      const trainingHoursData = await storage.getTrainingHoursByYearRange(start, end);
+      const trainingHoursData = await getTrainingHoursForAnalysis(start, end);
       console.log(`📊 교육 시간 데이터: ${trainingHoursData.length}개`);
       console.log(`📊 교육 시간 데이터 상세:`, trainingHoursData);
 
@@ -3448,21 +3513,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allEmployees = await storage.getAllEmployees();
       const activeEmployees = allEmployees.filter(emp => emp.isActive !== false);
       const rdEmployees = activeEmployees.filter(employee => {
-        const isRdDepartment = employee.department && (
-          employee.department.includes('기술연구소') ||
-          employee.department.includes('연구개발') ||
-          employee.department.includes('R&D') ||
-          employee.department.includes('연구') ||
-          employee.departmentCode === 'RD'
-        );
-
-        const isRdTeam = employee.team && (
-          employee.team.includes('연구') ||
-          employee.team.includes('개발') ||
-          employee.team.includes('R&D')
-        );
-
-        const isRd = isRdDepartment || isRdTeam;
+        const isRd = isRdEmployee(employee);
 
         if (isRd) {
           console.log(`🔍 R&D 직원 발견: ${employee.name} (부서: ${employee.department}, 팀: ${employee.team}, 부서코드: ${employee.departmentCode})`);
@@ -3542,7 +3593,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const end = parseInt(endYear as string);
 
       // 데이터 조회
-      const trainingHoursData = await storage.getTrainingHoursByYearRange(start, end);
+      const trainingHoursData = await getTrainingHoursForAnalysis(start, end);
       const teamEmployeesData = await storage.getTeamEmployeesByYearRange(start, end);
 
       // R&D 인원 자동 계산을 위한 전체 직원 데이터 조회

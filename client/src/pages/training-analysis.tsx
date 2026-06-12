@@ -50,42 +50,58 @@ interface TrainingHours {
   description?: string;
 }
 
+interface TeamTrainingAnalysisResult {
+  team: string;
+  totalHours: number;
+  employeeCount: number;
+  averageHoursPerEmployee: number;
+  trainingTypes: Record<string, number>;
+  yearlyBreakdown: Record<string, number>;
+}
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
 export default function TrainingAnalysis() {
-  const [startYear, setStartYear] = useState(2023);
-  const [endYear, setEndYear] = useState(2024);
+  const currentYear = new Date().getFullYear();
+  const [startYear, setStartYear] = useState(currentYear);
+  const [endYear, setEndYear] = useState(currentYear);
   const [includeTrainingTypeBreakdown, setIncludeTrainingTypeBreakdown] = useState(true);
   const [includeYearlyBreakdown, setIncludeYearlyBreakdown] = useState(true);
   const [useAutoRdEmployees, setUseAutoRdEmployees] = useState(true);
   const [isRdEmployeesModalOpen, setIsRdEmployeesModalOpen] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
 
+  const selectedYears = Array.from({ length: Math.max(0, endYear - startYear + 1) }, (_, index) => startYear + index);
+
   // 교육시간 변환 함수
   const convertTrainingToHours = async () => {
     setIsConverting(true);
     try {
-      const response = await fetch('/api/convert-training-to-hours', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          year: 2024 // 박연구의 교육이 2024년이므로 2024년으로 변환
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to convert training to hours');
+      const results = [];
+
+      for (const year of selectedYears) {
+        const response = await fetch('/api/convert-training-to-hours', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ year }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`${year}년 교육시간 변환에 실패했습니다.`);
+        }
+
+        results.push(await response.json());
       }
-      
-      const result = await response.json();
-      
+
       // 데이터 새로고침
       refetchAnalysis();
-      
-      alert(result.message);
+      refetchTeamAnalysis();
+      refetchTrainingHours();
+
+      const convertedTotal = results.reduce((sum, result) => sum + (result.convertedCount ?? 0), 0);
+      alert(`${startYear}년~${endYear}년 교육시간 데이터 ${convertedTotal}개 변환 완료`);
     } catch (error) {
       console.error('교육시간 변환 오류:', error);
       alert('교육시간 변환에 실패했습니다.');
@@ -95,7 +111,7 @@ export default function TrainingAnalysis() {
   };
 
   // 팀별 교육시간 분석 데이터 조회
-  const { data: teamAnalysisData, isLoading: isLoadingTeamAnalysis } = useQuery({
+  const { data: teamAnalysisData, isLoading: isLoadingTeamAnalysis, refetch: refetchTeamAnalysis } = useQuery<TeamTrainingAnalysisResult[]>({
     queryKey: ['/api/team-training-analysis', startYear, endYear],
     queryFn: async () => {
       const response = await fetch(`/api/team-training-analysis?startYear=${startYear}&endYear=${endYear}`);
@@ -128,7 +144,7 @@ export default function TrainingAnalysis() {
   });
 
   // 교육 시간 데이터 조회
-  const { data: trainingHours, isLoading: isLoadingTrainingHours } = useQuery<TrainingHours[]>({
+  const { data: trainingHours, isLoading: isLoadingTrainingHours, refetch: refetchTrainingHours } = useQuery<TrainingHours[]>({
     queryKey: ['/api/training-hours', startYear, endYear],
     queryFn: async () => {
       const response = await fetch(`/api/training-hours?startYear=${startYear}&endYear=${endYear}`);

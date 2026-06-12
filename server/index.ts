@@ -7,6 +7,18 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+const buildInfo = {
+  release: "2026-06-12-training-history-derived-hours",
+  commit:
+    process.env.APP_COMMIT_SHA ??
+    process.env.GIT_SHA ??
+    process.env.GITHUB_SHA ??
+    null,
+  features: {
+    trainingHistoryDerivedHours: true,
+  },
+};
+
 app.get("/api/health", async (_req, res) => {
   const database = await checkDatabaseHealth();
 
@@ -14,12 +26,14 @@ app.get("/api/health", async (_req, res) => {
     return res.status(503).json({
       status: "degraded",
       database,
+      build: buildInfo,
     });
   }
 
   res.json({
     status: "ok",
     database,
+    build: buildInfo,
   });
 });
 

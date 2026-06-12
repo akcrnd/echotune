@@ -803,7 +803,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const employeeId = req.query.employeeId as string;
       const training = employeeId
-        ? await storage.getTrainingHistory(employeeId)
+        ? await storage.getTrainingHistoryByEmployee(employeeId)
         : await storage.getAllTrainingHistory();
       res.json(training);
     } catch (error) {
@@ -954,6 +954,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("File upload error:", error);
       res.status(500).json({ error: "파일 처리 중 오류가 발생했습니다." });
+    }
+  });
+
+  app.get("/api/training/:id", async (req, res) => {
+    try {
+      const training = await storage.getTrainingHistory(req.params.id);
+      if (!training || Array.isArray(training)) {
+        return res.status(404).json({ error: "Training record not found" });
+      }
+      res.json(training);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch training record" });
     }
   });
 

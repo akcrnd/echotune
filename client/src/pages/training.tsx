@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +5,7 @@ import { Plus, Upload, BookOpen, Clock, Users, Calendar, BarChart3 } from "lucid
 import TrainingTable from "@/components/training/training-table";
 import TrainingFormDialog from "@/components/training/training-form-dialog";
 import TrainingUploadDialog from "@/components/training/training-upload-dialog";
-import type { TrainingHistory } from "@shared/schema";
+import type { Employee, TrainingHistory } from "@shared/schema";
 
 interface TrainingStats {
   total: number;
@@ -16,16 +15,21 @@ interface TrainingStats {
 }
 
 export default function Training() {
-  const { data: trainings, isLoading } = useQuery<TrainingHistory[]>({
+  const { data: trainings = [], isLoading: isLoadingTrainings } = useQuery<TrainingHistory[]>({
     queryKey: ['/api/training']
   });
 
-  // Calculate training stats
+  const { data: employees = [], isLoading: isLoadingEmployees } = useQuery<Employee[]>({
+    queryKey: ['/api/employees']
+  });
+
+  const isLoading = isLoadingTrainings || isLoadingEmployees;
+
   const stats: TrainingStats = {
-    total: trainings?.length || 0,
-    completed: trainings?.filter(t => t.status === 'completed').length || 0,
-    ongoing: trainings?.filter(t => t.status === 'ongoing').length || 0,
-    scheduled: trainings?.filter(t => t.status === 'planned').length || 0
+    total: trainings.length,
+    completed: trainings.filter(t => t.status === 'completed').length,
+    ongoing: trainings.filter(t => t.status === 'ongoing').length,
+    scheduled: trainings.filter(t => t.status === 'planned').length
   };
 
   if (isLoading) {
@@ -46,13 +50,9 @@ export default function Training() {
 
   return (
     <div className="p-6 space-y-6" data-testid="training-page">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">교육 관리</h1>
-          <p className="text-muted-foreground">교육 과정 및 이수 현황 관리</p>
-        </div>
-        <div className="flex space-x-2">
+      {/* Action toolbar */}
+      <div className="flex items-center justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button 
             variant="outline" 
             onClick={() => window.location.href = '/training-analysis'}
@@ -125,8 +125,8 @@ export default function Training() {
           <CardTitle>교육 과정 목록</CardTitle>
         </CardHeader>
         <CardContent>
-          {trainings && trainings.length > 0 ? (
-            <TrainingTable trainings={trainings} />
+          {trainings.length > 0 ? (
+            <TrainingTable trainings={trainings} employees={employees} />
           ) : (
             <div className="text-center py-12 text-muted-foreground">
               <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-50" />
